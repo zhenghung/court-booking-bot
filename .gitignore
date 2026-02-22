@@ -1,0 +1,22 @@
+# Binary output
+court-bot
+court-bot-linux-arm64
+
+# Environment variables
+.env
+ssh-key-*.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Test binary
+*.test
+
+# Go build cache
+/vendor/
