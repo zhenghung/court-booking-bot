@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,6 +33,8 @@ func main() {
 		cmdBook()
 	case "run":
 		cmdRun()
+	case "bot":
+		cmdBot()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -46,6 +50,7 @@ func printUsage() {
 	fmt.Println("  probe    Login and fetch timeslots for a given date")
 	fmt.Println("  book     Book a specific timeslot (tries all courts)")
 	fmt.Println("  run      Scheduler: wait for midnight and auto-book target slots")
+	fmt.Println("  bot      Run Telegram bot daemon (listens for /status commands)")
 	fmt.Println()
 	fmt.Println("Run 'court-bot <command> --help' for command flags.")
 }
@@ -413,6 +418,149 @@ func sendTelegramMessage(botToken, chatID, message string) error {
 	}
 
 	return nil
+}
+
+func cmdBot() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
+
+	if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
+		fmt.Fprintf(os.Stderr, "ERROR: GPROP_TELEGRAM_BOT_TOKEN and GPROP_TELEGRAM_CHAT_ID must be set\n")
+		os.Exit(1)
+	}
+
+	fmt.Println("Starting Telegram bot daemon...")
+	fmt.Printf("  Chat ID: %s\n", cfg.TelegramChatID)
+	fmt.Println("  Listening for /status commands...")
+	fmt.Println()
+
+	var lastUpdateID int64 = 0
+
+	for {
+		updates, err := getTelegramUpdates(cfg.TelegramBotToken, lastUpdateID+1)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WARN: failed to get updates: %v\n", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		for _, update := range updates {
+			lastUpdateID = update.UpdateID
+
+			if update.Message == nil {
+				continue
+			}
+
+			chatIDStr := fmt.Sprintf("%d", update.Message.Chat.ID)
+			if chatIDStr != cfg.TelegramChatID {
+				continue
+			}
+
+			text := strings.TrimSpace(update.Message.Text)
+			if text == "/status" || strings.HasPrefix(text, "/status@") {
+				fmt.Printf("[%s] Received /status from %s\n",
+					time.Now().Format("15:04:05"), update.Message.From.Username)
+				handleStatusCommand(cfg)
+			}
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func getTelegramUpdates(botToken string, offset int64) ([]TelegramUpdate, error) {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30", botToken, offset)
+	resp, err := http.Get(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result TelegramUpdatesResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	if !result.OK {
+		return nil, fmt.Errorf("telegram API error")
+	}
+
+	return result.Result, nil
+}
+
+type TelegramUpdatesResponse struct {
+	OK     bool             `json:"ok"`
+	Result []TelegramUpdate `json:"result"`
+}
+
+type TelegramUpdate struct {
+	UpdateID int64            `json:"update_id"`
+	Message  *TelegramMessage `json:"message"`
+}
+
+type TelegramMessage struct {
+	Text string       `json:"text"`
+	Chat TelegramChat `json:"chat"`
+	From TelegramUser `json:"from"`
+}
+
+type TelegramChat struct {
+	ID int64 `json:"id"`
+}
+
+type TelegramUser struct {
+	Username string `json:"username"`
+}
+
+func handleStatusCommand(cfg *config.Config) {
+	targetDay, _ := parseDayOfWeek(cfg.TargetDay)
+	today := time.Now()
+	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
+	targetDateParsed, _ := time.Parse("2006-01-02", targetDate)
+
+	nextFriday := today
+	for nextFriday.Weekday() != targetDay {
+		nextFriday = nextFriday.AddDate(0, 0, 1)
+	}
+	nextRun := time.Date(nextFriday.Year(), nextFriday.Month(), nextFriday.Day(), 0, 0, 0, 0, today.Location())
+	if nextRun.Before(today) {
+		nextRun = nextRun.AddDate(0, 0, 7)
+	}
+
+	var planStr string
+	for _, entry := range cfg.BookingPlan {
+		planStr += fmt.Sprintf("\n  • %s → courts %v", entry.Slot, entry.Courts)
+	}
+
+	status := fmt.Sprintf(`🥒🎾 Court Bot Status
+
+📅 Target day: %s
+📆 Next booking date: %s (%s)
+⏰ Next cron run: %s
+⏱ Time until run: %s
+
+📋 Booking plan:%s
+
+✅ Bot is running`,
+		cfg.TargetDay,
+		targetDate,
+		targetDateParsed.Weekday(),
+		nextRun.Format("Mon Jan 2, 15:04"),
+		time.Until(nextRun).Round(time.Minute),
+		planStr,
+	)
+
+	if err := sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, status); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: failed to send status: %v\n", err)
+	}
 }
 
 func parseDayOfWeek(s string) (time.Weekday, error) {
