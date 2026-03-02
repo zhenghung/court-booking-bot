@@ -33,6 +33,7 @@ GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot
 | Command | Description |
 |---------|-------------|
 | `/status` | Check bot config, next run time, booking plan |
+| `/setday <day>` | Update booking day and cron day (e.g., `/setday monday`) |
 
 ## Deployment
 
@@ -145,6 +146,11 @@ Environment variables (in `.env`):
 
 ### Change booking day
 
+Preferred (Telegram):
+1. In Telegram group, run: `/setday monday`
+2. Bot updates both `GPROP_TARGET_DAY` in `~/.env` and user crontab
+
+Manual fallback:
 1. Update server `.env`: `GPROP_TARGET_DAY=monday`
 2. Update crontab: `0 0 * * 1` (1=Monday)
 

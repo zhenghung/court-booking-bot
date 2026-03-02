@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,7 +53,7 @@ func printUsage() {
 	fmt.Println("  probe    Login and fetch timeslots for a given date")
 	fmt.Println("  book     Book a specific timeslot (tries all courts)")
 	fmt.Println("  run      Scheduler: wait for midnight and auto-book target slots")
-	fmt.Println("  bot      Run Telegram bot daemon (listens for /status commands)")
+	fmt.Println("  bot      Run Telegram bot daemon (listens for /status and /setday)")
 	fmt.Println()
 	fmt.Println("Run 'court-bot <command> --help' for command flags.")
 }
@@ -434,7 +437,7 @@ func cmdBot() {
 
 	fmt.Println("Starting Telegram bot daemon...")
 	fmt.Printf("  Chat ID: %s\n", cfg.TelegramChatID)
-	fmt.Println("  Listening for /status commands...")
+	fmt.Println("  Listening for /status and /setday commands...")
 	fmt.Println()
 
 	var lastUpdateID int64 = 0
@@ -460,10 +463,22 @@ func cmdBot() {
 			}
 
 			text := strings.TrimSpace(update.Message.Text)
-			if text == "/status" || strings.HasPrefix(text, "/status@") {
+			cmd, arg := parseBotCommand(text)
+			switch cmd {
+			case "/status":
+				currentCfg, err := config.Load()
+				if err != nil {
+					_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID,
+						fmt.Sprintf("⚠️ Failed to load config: %v", err))
+					continue
+				}
 				fmt.Printf("[%s] Received /status from %s\n",
 					time.Now().Format("15:04:05"), update.Message.From.Username)
-				handleStatusCommand(cfg)
+				handleStatusCommand(currentCfg)
+			case "/setday":
+				fmt.Printf("[%s] Received /setday from %s\n",
+					time.Now().Format("15:04:05"), update.Message.From.Username)
+				handleSetDayCommand(cfg.TelegramBotToken, cfg.TelegramChatID, arg)
 			}
 		}
 
@@ -561,6 +576,162 @@ func handleStatusCommand(cfg *config.Config) {
 	if err := sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, status); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: failed to send status: %v\n", err)
 	}
+}
+
+func handleSetDayCommand(botToken, chatID, dayInput string) {
+	if strings.TrimSpace(dayInput) == "" {
+		_ = sendTelegramMessage(botToken, chatID,
+			"Usage: /setday <day>\nExample: /setday monday\nAllowed: sunday, monday, tuesday, wednesday, thursday, friday, saturday")
+		return
+	}
+
+	day, err := normalizeDayInput(dayInput)
+	if err != nil {
+		_ = sendTelegramMessage(botToken, chatID,
+			fmt.Sprintf("❌ Invalid day: %q\nUse: sunday, monday, tuesday, wednesday, thursday, friday, saturday", dayInput))
+		return
+	}
+
+	weekday, _ := parseDayOfWeek(day)
+	envPath := envFilePath()
+	originalEnv, err := setEnvKey(envPath, "GPROP_TARGET_DAY", day)
+	if err != nil {
+		_ = sendTelegramMessage(botToken, chatID, fmt.Sprintf("❌ Failed to update %s: %v", envPath, err))
+		return
+	}
+
+	cronLine, err := updateSchedulerCron(weekday)
+	if err != nil {
+		rollbackErr := os.WriteFile(envPath, originalEnv, 0o600)
+		if rollbackErr != nil {
+			_ = sendTelegramMessage(botToken, chatID,
+				fmt.Sprintf("❌ Failed to update cron: %v\n⚠️ Also failed to roll back %s: %v", err, envPath, rollbackErr))
+			return
+		}
+		_ = sendTelegramMessage(botToken, chatID,
+			fmt.Sprintf("❌ Failed to update cron: %v\nℹ️ .env change was rolled back.", err))
+		return
+	}
+
+	if err := os.Setenv("GPROP_TARGET_DAY", day); err != nil {
+		_ = sendTelegramMessage(botToken, chatID,
+			fmt.Sprintf("⚠️ Day updated, but failed to refresh runtime env: %v", err))
+		return
+	}
+
+	_ = sendTelegramMessage(botToken, chatID,
+		fmt.Sprintf("✅ Booking day updated to %s\n🕛 Cron: %s", day, cronLine))
+}
+
+func parseBotCommand(text string) (string, string) {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) == 0 {
+		return "", ""
+	}
+
+	cmd := strings.ToLower(strings.SplitN(fields[0], "@", 2)[0])
+	arg := ""
+	if len(fields) > 1 {
+		arg = strings.ToLower(strings.TrimSpace(fields[1]))
+	}
+	return cmd, arg
+}
+
+func normalizeDayInput(s string) (string, error) {
+	day, err := parseDayOfWeek(strings.ToLower(strings.TrimSpace(s)))
+	if err != nil {
+		return "", err
+	}
+	return strings.ToLower(day.String()), nil
+}
+
+func envFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ".env"
+	}
+	return filepath.Join(home, ".env")
+}
+
+func setEnvKey(path, key, value string) ([]byte, error) {
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	content := strings.ReplaceAll(string(original), "\r\n", "\n")
+	lines := strings.Split(content, "\n")
+	prefix := key + "="
+	found := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, prefix) {
+			lines[i] = prefix + value
+			found = true
+		}
+	}
+
+	if !found {
+		lines = append(lines, prefix+value)
+	}
+
+	updated := strings.Join(lines, "\n")
+	if !strings.HasSuffix(updated, "\n") {
+		updated += "\n"
+	}
+
+	if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+		return nil, err
+	}
+
+	return original, nil
+}
+
+func weekdayToCronNumber(day time.Weekday) int {
+	return int(day)
+}
+
+func updateSchedulerCron(day time.Weekday) (string, error) {
+	const schedulerCmd = "cd /home/ubuntu && ./court-bot run --now >> /home/ubuntu/court-bot.log 2>&1"
+	newLine := fmt.Sprintf("0 0 * * %d %s", weekdayToCronNumber(day), schedulerCmd)
+
+	listCmd := exec.Command("crontab", "-l")
+	listOut, listErr := listCmd.CombinedOutput()
+
+	existing := ""
+	if listErr == nil {
+		existing = string(listOut)
+	} else {
+		stderr := strings.ToLower(string(listOut))
+		if !strings.Contains(stderr, "no crontab for") {
+			return "", fmt.Errorf("failed to read crontab: %w (%s)", listErr, strings.TrimSpace(string(listOut)))
+		}
+	}
+
+	var buffer bytes.Buffer
+	for _, line := range strings.Split(existing, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.Contains(line, schedulerCmd) {
+			continue
+		}
+		buffer.WriteString(line)
+		buffer.WriteString("\n")
+	}
+	buffer.WriteString(newLine)
+	buffer.WriteString("\n")
+
+	setCmd := exec.Command("crontab", "-")
+	setCmd.Stdin = strings.NewReader(buffer.String())
+	setOut, setErr := setCmd.CombinedOutput()
+	if setErr != nil {
+		return "", fmt.Errorf("failed to write crontab: %w (%s)", setErr, strings.TrimSpace(string(setOut)))
+	}
+
+	return newLine, nil
 }
 
 func parseDayOfWeek(s string) (time.Weekday, error) {

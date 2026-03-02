@@ -47,11 +47,18 @@ ssh -i /Users/zhenghung.chuah/Documents/personal/court-booking-bot/ssh-key-2026-
 
 ## 5) Cron schedule (current)
 
-Current scheduler is set to Wednesday midnight MYT:
+Current scheduler is set to Friday midnight MYT:
 
 ```cron
-0 0 * * 3 cd /home/ubuntu && ./court-bot run --now >> /home/ubuntu/court-bot.log 2>&1
+0 0 * * 5 cd /home/ubuntu && ./court-bot run --now >> /home/ubuntu/court-bot.log 2>&1
 ```
+
+Preferred way to change booking day:
+
+- In Telegram group, send: `/setday monday` (or any weekday)
+- Bot will update both:
+  - `GPROP_TARGET_DAY` in `~/.env`
+  - user crontab day number
 
 Check/update cron:
 
