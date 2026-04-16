@@ -273,6 +273,88 @@ func (c *Client) BookSlot(facilityID, unitID, name, contact, date, timeSlot stri
 	return &result, nil
 }
 
+// Booking represents a single booking entry from the listing.
+type Booking struct {
+	ID        string // e.g. "399637"
+	BookingNo string // e.g. "BK399637"
+	Facility  string // e.g. "Pickleball Court P3"
+	Date      string // e.g. "2026-04-24"
+	TimeStart string // e.g. "07:00:00"
+	TimeEnd   string // e.g. "09:00:00"
+	Status    string // e.g. "Approved"
+}
+
+// GetBookings fetches the list of bookings from today onwards.
+func (c *Client) GetBookings() ([]Booking, error) {
+	today := time.Now().Format("2006-01-02")
+	endpoint := fmt.Sprintf("%s/booking/booking_listing?sEcho=1&iColumns=7&iDisplayStart=0&iDisplayLength=50&mDataProp_0=fldBookingNo&mDataProp_1=fldFName&mDataProp_2=fldUnitNumber&mDataProp_3=bookTime&mDataProp_4=fldAmountPayable&mDataProp_5=fldApproval&mDataProp_6=actions&filterDateFrom=%s", c.BaseURL, today)
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bookings request: %w", err)
+	}
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("bookings request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read bookings response: %w", err)
+	}
+
+	// Strip UTF-8 BOM if present
+	if len(body) >= 3 && body[0] == 0xef && body[1] == 0xbb && body[2] == 0xbf {
+		body = body[3:]
+	}
+
+	var listResp struct {
+		Data []struct {
+			BookingID string `json:"fldBookingId"`
+			BookingNo string `json:"fldBookingNo"`
+			Facility  string `json:"fldFName"`
+			Date      string `json:"fldBookingDate"`
+			TimeStart string `json:"fldBookingTimeStart"`
+			TimeEnd   string `json:"fldBookingTimeEnd"`
+			Approval  string `json:"fldApproval"`
+		} `json:"aaData"`
+	}
+
+	if err := json.Unmarshal(body, &listResp); err != nil {
+		return nil, fmt.Errorf("failed to parse bookings response: %w", err)
+	}
+
+	var bookings []Booking
+	for _, b := range listResp.Data {
+		// Extract status from HTML like <span class="badge bg-success-400">Approved</span>
+		status := "Unknown"
+		if strings.Contains(b.Approval, "Approved") {
+			status = "Approved"
+		} else if strings.Contains(b.Approval, "Pending") {
+			status = "Pending"
+		} else if strings.Contains(b.Approval, "Rejected") {
+			status = "Rejected"
+		} else if strings.Contains(b.Approval, "Cancelled") {
+			status = "Cancelled"
+		}
+
+		bookings = append(bookings, Booking{
+			ID:        b.BookingID,
+			BookingNo: b.BookingNo,
+			Facility:  b.Facility,
+			Date:      b.Date,
+			TimeStart: b.TimeStart,
+			TimeEnd:   b.TimeEnd,
+			Status:    status,
+		})
+	}
+
+	return bookings, nil
+}
+
 // fetchCSRFToken loads the login page and extracts the CSRF token from the HTML.
 func (c *Client) fetchCSRFToken() (string, error) {
 	resp, err := c.HTTPClient.Get(c.BaseURL + "/login")

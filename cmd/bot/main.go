@@ -437,7 +437,7 @@ func cmdBot() {
 
 	fmt.Println("Starting Telegram bot daemon...")
 	fmt.Printf("  Chat ID: %s\n", cfg.TelegramChatID)
-	fmt.Println("  Listening for /status and /setday commands...")
+	fmt.Println("  Listening for /status, /setday, /bookings commands...")
 	fmt.Println()
 
 	var lastUpdateID int64 = 0
@@ -479,6 +479,10 @@ func cmdBot() {
 				fmt.Printf("[%s] Received /setday from %s\n",
 					time.Now().Format("15:04:05"), update.Message.From.Username)
 				handleSetDayCommand(cfg.TelegramBotToken, cfg.TelegramChatID, arg)
+			case "/bookings":
+				fmt.Printf("[%s] Received /bookings from %s\n",
+					time.Now().Format("15:04:05"), update.Message.From.Username)
+				handleBookingsCommand(cfg)
 			}
 		}
 
@@ -621,6 +625,59 @@ func handleSetDayCommand(botToken, chatID, dayInput string) {
 
 	_ = sendTelegramMessage(botToken, chatID,
 		fmt.Sprintf("✅ Booking day updated to %s\n🕛 Cron: %s", day, cronLine))
+}
+
+func handleBookingsCommand(cfg *config.Config) {
+	client := api.NewClient(cfg.BaseURL)
+	if err := client.Login(cfg.Email, cfg.Password); err != nil {
+		_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID,
+			fmt.Sprintf("❌ Login failed: %v", err))
+		return
+	}
+
+	bookings, err := client.GetBookings()
+	if err != nil {
+		_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID,
+			fmt.Sprintf("❌ Failed to fetch bookings: %v", err))
+		return
+	}
+
+	if len(bookings) == 0 {
+		_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID,
+			"📋 No upcoming bookings found.")
+		return
+	}
+
+	msg := "🥒🎾 Upcoming Bookings\n\n"
+	for _, b := range bookings {
+		// Format time: "07:00:00" -> "07:00"
+		timeStart := b.TimeStart
+		if len(timeStart) >= 5 {
+			timeStart = timeStart[:5]
+		}
+		timeEnd := b.TimeEnd
+		if len(timeEnd) >= 5 {
+			timeEnd = timeEnd[:5]
+		}
+
+		// Format date: "2026-04-24" -> "Apr 24 (Fri)"
+		dateStr := b.Date
+		if t, err := time.Parse("2006-01-02", b.Date); err == nil {
+			dateStr = t.Format("Jan 2 (Mon)")
+		}
+
+		statusEmoji := "✅"
+		if b.Status == "Pending" {
+			statusEmoji = "⏳"
+		} else if b.Status == "Cancelled" || b.Status == "Rejected" {
+			statusEmoji = "❌"
+		}
+
+		msg += fmt.Sprintf("%s %s\n   📍 %s\n   🕐 %s - %s\n\n",
+			statusEmoji, dateStr, b.Facility, timeStart, timeEnd)
+	}
+
+	_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, msg)
 }
 
 func parseBotCommand(text string) (string, string) {

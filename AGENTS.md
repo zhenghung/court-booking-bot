@@ -34,6 +34,7 @@ GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot
 |---------|-------------|
 | `/status` | Check bot config, next run time, booking plan |
 | `/setday <day>` | Update booking day and cron day (e.g., `/setday monday`) |
+| `/bookings` | Show upcoming bookings from today onwards |
 
 ## Deployment
 
