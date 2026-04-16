@@ -483,6 +483,10 @@ func cmdBot() {
 				fmt.Printf("[%s] Received /bookings from %s\n",
 					time.Now().Format("15:04:05"), update.Message.From.Username)
 				handleBookingsCommand(cfg)
+			case "/help":
+				fmt.Printf("[%s] Received /help from %s\n",
+					time.Now().Format("15:04:05"), update.Message.From.Username)
+				handleHelpCommand(cfg.TelegramBotToken, cfg.TelegramChatID)
 			}
 		}
 
@@ -678,6 +682,17 @@ func handleBookingsCommand(cfg *config.Config) {
 	}
 
 	_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, msg)
+}
+
+func handleHelpCommand(botToken, chatID string) {
+	help := `🥒🎾 Court Bot Commands
+
+/status — Check bot config and next scheduled run
+/setday <day> — Change booking day (e.g. /setday monday)
+/bookings — Show upcoming bookings
+/help — Show this help message`
+
+	_ = sendTelegramMessage(botToken, chatID, help)
 }
 
 func parseBotCommand(text string) (string, string) {
