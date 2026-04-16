@@ -85,15 +85,31 @@ func (c *Client) Login(email, password string) error {
 	}
 
 	// Check if login was successful by looking at the response
-	var loginResp map[string]interface{}
-	if err := json.Unmarshal(body, &loginResp); err != nil {
-		return fmt.Errorf("failed to parse login response (got non-JSON, status %d)", resp.StatusCode)
+	// Strip UTF-8 BOM if present (server sometimes adds it)
+	if len(body) >= 3 && body[0] == 0xef && body[1] == 0xbb && body[2] == 0xbf {
+		body = body[3:]
 	}
 
-	// Check the status field
-	if status, ok := loginResp["status"].(bool); ok && !status {
-		msgTitle, _ := loginResp["msg_title"].(string)
-		return fmt.Errorf("login failed: %s", msgTitle)
+	var loginResp map[string]interface{}
+	if err := json.Unmarshal(body, &loginResp); err != nil {
+		preview := string(body)
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		return fmt.Errorf("failed to parse login response (got non-JSON, status %d): %s", resp.StatusCode, preview)
+	}
+
+	// Check for login success - API uses "msg" field with success message
+	// Note: "stat" field is unreliable (returns false even on success)
+	msg, _ := loginResp["msg"].(string)
+	if msg == "" {
+		// Fallback: check legacy "status" field
+		if status, ok := loginResp["status"].(bool); ok && !status {
+			msgTitle, _ := loginResp["msg_title"].(string)
+			return fmt.Errorf("login failed: %s", msgTitle)
+		}
+	} else if msg != "Logged In Successfully" {
+		return fmt.Errorf("login failed: %s", msg)
 	}
 
 	// Update CSRF token from response if present (server may rotate it)
@@ -101,7 +117,7 @@ func (c *Client) Login(email, password string) error {
 		c.csrfToken = newToken
 	}
 
-	fmt.Printf("  Login status: %v\n", loginResp["status"])
+	fmt.Printf("  Login status: %v\n", msg)
 	return nil
 }
 
@@ -139,6 +155,11 @@ func (c *Client) GetTimeslots(facilityID, date string) ([]Timeslot, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("timeslot request returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Strip UTF-8 BOM if present (server sometimes adds it)
+	if len(body) >= 3 && body[0] == 0xef && body[1] == 0xbb && body[2] == 0xbf {
+		body = body[3:]
 	}
 
 	// Parse the JSON to extract the "html" field
@@ -237,6 +258,11 @@ func (c *Client) BookSlot(facilityID, unitID, name, contact, date, timeSlot stri
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("booking returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Strip UTF-8 BOM if present (server sometimes adds it)
+	if len(body) >= 3 && body[0] == 0xef && body[1] == 0xbb && body[2] == 0xbf {
+		body = body[3:]
 	}
 
 	var result BookingResult
