@@ -253,10 +253,17 @@ func cmdRun() {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
-	if len(cfg.BookingPlan) == 0 {
-		fmt.Fprintf(os.Stderr, "ERROR: GPROP_BOOKING_PLAN must be set (e.g. 07:00-08:00>7937,7935;08:00-09:00>7937,7936,7935)\n")
+
+	// Check that at least one account has a booking plan
+	totalSlots := 0
+	for _, acc := range cfg.Accounts {
+		totalSlots += len(acc.BookingPlan)
+	}
+	if totalSlots == 0 {
+		fmt.Fprintf(os.Stderr, "ERROR: No booking plans configured. Set GPROP_BOOKING_PLAN or GPROP_ACCOUNT_N_BOOKING_PLAN\n")
 		os.Exit(1)
 	}
+
 	notifyEnabled := cfg.TelegramBotToken != "" && cfg.TelegramChatID != ""
 	notify := func(msg string) {
 		if !notifyEnabled {
@@ -274,12 +281,15 @@ func cmdRun() {
 
 	fmt.Printf("Target day:   %s\n", cfg.TargetDay)
 	fmt.Printf("Target date:  %s (%s)\n", targetDate, targetDateParsed.Weekday())
-	fmt.Println("Booking plan:")
-	for _, entry := range cfg.BookingPlan {
-		fmt.Printf("  %s → courts %v\n", entry.Slot, entry.Courts)
+	fmt.Printf("Accounts:     %d\n", len(cfg.Accounts))
+	for i, acc := range cfg.Accounts {
+		fmt.Printf("\n  [Account %d: %s]\n", i+1, acc.Name)
+		for _, entry := range acc.BookingPlan {
+			fmt.Printf("    %s → courts %v\n", entry.Slot, entry.Courts)
+		}
 	}
 	if *dryRun {
-		fmt.Println("Mode:         DRY RUN")
+		fmt.Println("\nMode:         DRY RUN")
 	}
 	fmt.Println()
 
@@ -296,15 +306,19 @@ func cmdRun() {
 		fmt.Println()
 	}
 
-	// Step 1: Pre-authenticate
-	fmt.Println("[1/3] Pre-authenticating...")
-	client := api.NewClient(cfg.BaseURL)
-	if err := client.Login(cfg.Email, cfg.Password); err != nil {
-		notify(fmt.Sprintf("Court bot error: login failed - %v", err))
-		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-		os.Exit(1)
+	// Step 1: Pre-authenticate all accounts
+	fmt.Println("[1/3] Pre-authenticating all accounts...")
+	clients := make([]*api.Client, len(cfg.Accounts))
+	for i, acc := range cfg.Accounts {
+		clients[i] = api.NewClient(cfg.BaseURL)
+		fmt.Printf("  %s: ", acc.Name)
+		if err := clients[i].Login(acc.Email, acc.Password); err != nil {
+			notify(fmt.Sprintf("Court bot error: login failed for %s - %v", acc.Name, err))
+			fmt.Fprintf(os.Stderr, "ERROR\n    %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("OK")
 	}
-	fmt.Println("  Login successful!")
 	fmt.Println()
 
 	// Step 2: Wait for midnight (unless --now)
@@ -320,11 +334,13 @@ func cmdRun() {
 			fmt.Printf("  Sleeping %s, then re-authenticating...\n", preLoginWait.Round(time.Second))
 			time.Sleep(preLoginWait)
 
-			fmt.Println("  Re-authenticating (session refresh)...")
-			if err := client.Login(cfg.Email, cfg.Password); err != nil {
-				notify(fmt.Sprintf("Court bot error: re-login failed - %v", err))
-				fmt.Fprintf(os.Stderr, "ERROR re-login: %v\n", err)
-				os.Exit(1)
+			fmt.Println("  Re-authenticating all accounts...")
+			for i, acc := range cfg.Accounts {
+				if err := clients[i].Login(acc.Email, acc.Password); err != nil {
+					notify(fmt.Sprintf("Court bot error: re-login failed for %s - %v", acc.Name, err))
+					fmt.Fprintf(os.Stderr, "ERROR re-login %s: %v\n", acc.Name, err)
+					os.Exit(1)
+				}
 			}
 			fmt.Println("  Re-login successful!")
 		}
@@ -341,67 +357,80 @@ func cmdRun() {
 	}
 	fmt.Println()
 
-	// Step 3: Book each target slot using per-slot court priority
+	// Step 3: Book slots for each account
 	fmt.Println("[3/3] Booking target slots...")
-	successCount := 0
-	for _, entry := range cfg.BookingPlan {
-		fmt.Printf("\n  === Slot: %s (courts: %v) ===\n", entry.Slot, entry.Courts)
-		booked := false
+	totalSuccess := 0
+	for i, acc := range cfg.Accounts {
+		if len(acc.BookingPlan) == 0 {
+			continue
+		}
 
-		for _, fid := range entry.Courts {
-			if *dryRun {
-				fmt.Printf("  [DRY RUN] Would try court %s for %s on %s\n", fid, entry.Slot, targetDate)
-				continue
-			}
+		fmt.Printf("\n=== %s ===\n", acc.Name)
+		client := clients[i]
+		successCount := 0
 
-			// Try booking with retries
-			var lastErr error
-			for attempt := 1; attempt <= 3; attempt++ {
-				if attempt > 1 {
-					backoff := time.Duration(1<<(attempt-2)) * time.Second
-					fmt.Printf("  Retry %d after %s...\n", attempt, backoff)
-					time.Sleep(backoff)
-				}
+		for _, entry := range acc.BookingPlan {
+			fmt.Printf("\n  Slot: %s (courts: %v)\n", entry.Slot, entry.Courts)
+			booked := false
 
-				result, err := client.BookSlot(fid, cfg.UnitID, cfg.BookingName, cfg.Contact, targetDate, entry.Slot)
-				if err != nil {
-					lastErr = err
-					fmt.Printf("  Court %s attempt %d: ERROR %v\n", fid, attempt, err)
+			for _, fid := range entry.Courts {
+				if *dryRun {
+					fmt.Printf("    [DRY RUN] Would try court %s for %s on %s\n", fid, entry.Slot, targetDate)
 					continue
 				}
 
-				if result.Status {
-					fmt.Printf("  Court %s: SUCCESS — %s (ID: %d)\n", fid, result.Msg, result.InsertID)
-					booked = true
-					successCount++
-					break
-				} else {
-					fmt.Printf("  Court %s: REJECTED — %s\n", fid, result.Msg)
-					lastErr = fmt.Errorf("%s", result.Msg)
-					break // Don't retry on server rejection, try next court
+				// Try booking with retries
+				var lastErr error
+				for attempt := 1; attempt <= 3; attempt++ {
+					if attempt > 1 {
+						backoff := time.Duration(1<<(attempt-2)) * time.Second
+						fmt.Printf("    Retry %d after %s...\n", attempt, backoff)
+						time.Sleep(backoff)
+					}
+
+					result, err := client.BookSlot(fid, acc.UnitID, acc.BookingName, acc.Contact, targetDate, entry.Slot)
+					if err != nil {
+						lastErr = err
+						fmt.Printf("    Court %s attempt %d: ERROR %v\n", fid, attempt, err)
+						continue
+					}
+
+					if result.Status {
+						fmt.Printf("    Court %s: SUCCESS — %s (ID: %d)\n", fid, result.Msg, result.InsertID)
+						booked = true
+						successCount++
+						break
+					} else {
+						fmt.Printf("    Court %s: REJECTED — %s\n", fid, result.Msg)
+						lastErr = fmt.Errorf("%s", result.Msg)
+						break // Don't retry on server rejection, try next court
+					}
+				}
+
+				if booked {
+					break // Move to next slot
+				}
+				if lastErr != nil {
+					fmt.Printf("    Court %s: failed — %v\n", fid, lastErr)
 				}
 			}
 
-			if booked {
-				break // Move to next slot
-			}
-			if lastErr != nil {
-				fmt.Printf("  Court %s: failed — %v\n", fid, lastErr)
+			if !booked && !*dryRun {
+				fmt.Printf("    FAILED to book %s on any court\n", entry.Slot)
 			}
 		}
 
-		if !booked && !*dryRun {
-			fmt.Printf("  FAILED to book %s on any court\n", entry.Slot)
-		}
+		fmt.Printf("\n  %s: %d/%d slots booked\n", acc.Name, successCount, len(acc.BookingPlan))
+		totalSuccess += successCount
 	}
 
 	fmt.Println()
 	if *dryRun {
 		fmt.Println("=== DRY RUN complete ===")
-		notify(fmt.Sprintf("Court bot dry run complete for %s (%d plan entries)", targetDate, len(cfg.BookingPlan)))
+		notify(fmt.Sprintf("Court bot dry run complete for %s (%d accounts, %d total slots)", targetDate, len(cfg.Accounts), totalSlots))
 	} else {
-		fmt.Printf("=== Done: %d/%d slots booked ===\n", successCount, len(cfg.BookingPlan))
-		notify(fmt.Sprintf("Court bot done for %s: %d/%d slots booked", targetDate, successCount, len(cfg.BookingPlan)))
+		fmt.Printf("=== Done: %d/%d total slots booked ===\n", totalSuccess, totalSlots)
+		notify(fmt.Sprintf("Court bot done for %s: %d/%d slots booked", targetDate, totalSuccess, totalSlots))
 	}
 }
 
@@ -558,9 +587,18 @@ func handleStatusCommand(cfg *config.Config) {
 		nextRun = nextRun.AddDate(0, 0, 7)
 	}
 
+	// Build account/plan summary
 	var planStr string
-	for _, entry := range cfg.BookingPlan {
-		planStr += fmt.Sprintf("\n  • %s → courts %v", entry.Slot, entry.Courts)
+	totalSlots := 0
+	for _, acc := range cfg.Accounts {
+		if len(acc.BookingPlan) == 0 {
+			continue
+		}
+		planStr += fmt.Sprintf("\n\n👤 %s", acc.Name)
+		for _, entry := range acc.BookingPlan {
+			planStr += fmt.Sprintf("\n  • %s → %v", entry.Slot, entry.Courts)
+			totalSlots++
+		}
 	}
 
 	status := fmt.Sprintf(`🥒🎾 Court Bot Status
@@ -569,6 +607,7 @@ func handleStatusCommand(cfg *config.Config) {
 📆 Next booking date: %s (%s)
 ⏰ Next cron run: %s
 ⏱ Time until run: %s
+👥 Accounts: %d (%d slots)
 
 📋 Booking plan:%s
 
@@ -578,6 +617,8 @@ func handleStatusCommand(cfg *config.Config) {
 		targetDateParsed.Weekday(),
 		nextRun.Format("Mon Jan 2, 15:04"),
 		time.Until(nextRun).Round(time.Minute),
+		len(cfg.Accounts),
+		totalSlots,
 		planStr,
 	)
 
@@ -632,53 +673,59 @@ func handleSetDayCommand(botToken, chatID, dayInput string) {
 }
 
 func handleBookingsCommand(cfg *config.Config) {
-	client := api.NewClient(cfg.BaseURL)
-	if err := client.Login(cfg.Email, cfg.Password); err != nil {
-		_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID,
-			fmt.Sprintf("❌ Login failed: %v", err))
-		return
+	msg := "🥒🎾 Upcoming Bookings\n"
+	totalBookings := 0
+
+	for _, acc := range cfg.Accounts {
+		client := api.NewClient(cfg.BaseURL)
+		if err := client.Login(acc.Email, acc.Password); err != nil {
+			msg += fmt.Sprintf("\n👤 %s\n❌ Login failed: %v\n", acc.Name, err)
+			continue
+		}
+
+		bookings, err := client.GetBookings()
+		if err != nil {
+			msg += fmt.Sprintf("\n👤 %s\n❌ Failed to fetch: %v\n", acc.Name, err)
+			continue
+		}
+
+		if len(bookings) == 0 {
+			continue
+		}
+
+		msg += fmt.Sprintf("\n👤 %s\n", acc.Name)
+		for _, b := range bookings {
+			// Format time: "07:00:00" -> "07:00"
+			timeStart := b.TimeStart
+			if len(timeStart) >= 5 {
+				timeStart = timeStart[:5]
+			}
+			timeEnd := b.TimeEnd
+			if len(timeEnd) >= 5 {
+				timeEnd = timeEnd[:5]
+			}
+
+			// Format date: "2026-04-24" -> "Apr 24 (Fri)"
+			dateStr := b.Date
+			if t, err := time.Parse("2006-01-02", b.Date); err == nil {
+				dateStr = t.Format("Jan 2 (Mon)")
+			}
+
+			statusEmoji := "✅"
+			if b.Status == "Pending" {
+				statusEmoji = "⏳"
+			} else if b.Status == "Cancelled" || b.Status == "Rejected" {
+				statusEmoji = "❌"
+			}
+
+			msg += fmt.Sprintf("%s %s | %s-%s | %s\n",
+				statusEmoji, dateStr, timeStart, timeEnd, b.Facility)
+			totalBookings++
+		}
 	}
 
-	bookings, err := client.GetBookings()
-	if err != nil {
-		_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID,
-			fmt.Sprintf("❌ Failed to fetch bookings: %v", err))
-		return
-	}
-
-	if len(bookings) == 0 {
-		_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID,
-			"📋 No upcoming bookings found.")
-		return
-	}
-
-	msg := "🥒🎾 Upcoming Bookings\n\n"
-	for _, b := range bookings {
-		// Format time: "07:00:00" -> "07:00"
-		timeStart := b.TimeStart
-		if len(timeStart) >= 5 {
-			timeStart = timeStart[:5]
-		}
-		timeEnd := b.TimeEnd
-		if len(timeEnd) >= 5 {
-			timeEnd = timeEnd[:5]
-		}
-
-		// Format date: "2026-04-24" -> "Apr 24 (Fri)"
-		dateStr := b.Date
-		if t, err := time.Parse("2006-01-02", b.Date); err == nil {
-			dateStr = t.Format("Jan 2 (Mon)")
-		}
-
-		statusEmoji := "✅"
-		if b.Status == "Pending" {
-			statusEmoji = "⏳"
-		} else if b.Status == "Cancelled" || b.Status == "Rejected" {
-			statusEmoji = "❌"
-		}
-
-		msg += fmt.Sprintf("%s %s\n   📍 %s\n   🕐 %s - %s\n\n",
-			statusEmoji, dateStr, b.Facility, timeStart, timeEnd)
+	if totalBookings == 0 {
+		msg = "📋 No upcoming bookings found."
 	}
 
 	_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, msg)

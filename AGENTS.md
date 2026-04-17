@@ -120,7 +120,7 @@ court-booking-bot/
 
 ## Configuration
 
-Environment variables (in `.env`):
+### Single Account (legacy)
 
 | Variable | Description |
 |----------|-------------|
@@ -134,6 +134,22 @@ Environment variables (in `.env`):
 | `GPROP_BOOKING_PLAN` | Slots and court priority (e.g., `07:00-08:00>7935,7937`) |
 | `GPROP_TELEGRAM_BOT_TOKEN` | Telegram bot token |
 | `GPROP_TELEGRAM_CHAT_ID` | Telegram chat/group ID |
+
+### Multi-Account (optional)
+
+Use `GPROP_ACCOUNT_N_*` variables for multiple accounts (N = 1, 2, 3...):
+
+| Variable | Description |
+|----------|-------------|
+| `GPROP_ACCOUNT_N_NAME` | Display name for account |
+| `GPROP_ACCOUNT_N_EMAIL` | Login email |
+| `GPROP_ACCOUNT_N_PASSWORD` | Login password |
+| `GPROP_ACCOUNT_N_UNIT_ID` | Unit ID (falls back to global) |
+| `GPROP_ACCOUNT_N_BOOKING_NAME` | Booking name (falls back to global) |
+| `GPROP_ACCOUNT_N_CONTACT` | Contact (falls back to global) |
+| `GPROP_ACCOUNT_N_BOOKING_PLAN` | Account-specific booking plan |
+
+Each account can book up to 2 hours/week, so 2 accounts = 4 hours total.
 
 ## Testing Changes
 
