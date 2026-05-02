@@ -273,6 +273,30 @@ func (c *Client) BookSlot(facilityID, unitID, name, contact, date, timeSlot stri
 	return &result, nil
 }
 
+// Facility represents a court/facility with its ID and name.
+type Facility struct {
+	ID   string // e.g. "7935"
+	Name string // e.g. "Pickleball Court P1"
+}
+
+// UserProfile represents user profile information from the API.
+type UserProfile struct {
+	Name    string `json:"fldName"`
+	Contact string `json:"fldContact"`
+}
+
+// UserAPIResponse represents the API response structure.
+type UserAPIResponse struct {
+	Status  bool        `json:"status"`
+	Results UserProfile `json:"results"` // Single object for get_user_info
+}
+
+// UserUnitAPIResponse represents the API response structure for get_unit_user.
+type UserUnitAPIResponse struct {
+	Status  bool          `json:"status"`
+	Results []UserProfile `json:"results"` // Array for get_unit_user
+}
+
 // Booking represents a single booking entry from the listing.
 type Booking struct {
 	ID        string // e.g. "399637"
@@ -353,6 +377,187 @@ func (c *Client) GetBookings() ([]Booking, error) {
 	}
 
 	return bookings, nil
+}
+
+// GetFacilities fetches the list of available facilities/courts from the booking page.
+func (c *Client) GetFacilities() ([]Facility, error) {
+	endpoint := c.BaseURL + "/booking/add_new_booking"
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create facilities request: %w", err)
+	}
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("facilities request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read facilities response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("facilities request returned status %d", resp.StatusCode)
+	}
+
+	return parseFacilityHTML(string(body)), nil
+}
+
+// GetUserProfile fetches user profile information (name, contact) from the API.
+func (c *Client) GetUserProfile() (*UserProfile, error) {
+	endpoint := c.BaseURL + "/booking/get_user_info"
+
+	form := url.Values{}
+	form.Set("is_ajax", "1")
+	form.Set("_co6sO0rpsfat", c.csrfToken)
+
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user profile request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("user profile request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read user profile response: %w", err)
+	}
+
+	var response UserAPIResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse user profile response: %w (body: %s)", err, string(body))
+	}
+
+	if !response.Status {
+		return nil, fmt.Errorf("API returned status false")
+	}
+
+	return &response.Results, nil
+}
+
+// GetUnitUserProfile fetches unit-specific user profile information from the API.
+func (c *Client) GetUnitUserProfile(unitID string) (*UserProfile, error) {
+	endpoint := c.BaseURL + "/booking/get_unit_user"
+
+	form := url.Values{}
+	form.Set("is_ajax", "1")
+	form.Set("unitId", unitID)
+	form.Set("_co6sO0rpsfat", c.csrfToken)
+
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create unit user profile request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("unit user profile request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read unit user profile response: %w", err)
+	}
+
+	var response UserUnitAPIResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse unit user profile response: %w (body: %s)", err, string(body))
+	}
+
+	if !response.Status || len(response.Results) == 0 {
+		return nil, fmt.Errorf("API returned no results")
+	}
+
+	return &response.Results[0], nil
+}
+
+// ResolveCourtNameToID resolves a court name (e.g., "Pickleball Court P1") to its ID (e.g., "7935").
+// If the input is already a numeric ID, it returns it as-is.
+// Returns an error if the name cannot be resolved.
+func (c *Client) ResolveCourtNameToID(courtInput string) (string, error) {
+	// If it's already a numeric ID, return it as-is
+	if isNumeric(courtInput) {
+		return courtInput, nil
+	}
+
+	// Fetch facilities to build a name-to-ID mapping
+	facilities, err := c.GetFacilities()
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch facilities for name resolution: %w", err)
+	}
+
+	// Build case-insensitive name-to-ID map
+	nameToID := make(map[string]string)
+	for _, f := range facilities {
+		lowerName := strings.ToLower(f.Name)
+		nameToID[lowerName] = f.ID
+	}
+
+	// Try to match the input (case-insensitive)
+	lowerInput := strings.ToLower(strings.TrimSpace(courtInput))
+	if id, ok := nameToID[lowerInput]; ok {
+		return id, nil
+	}
+
+	// Try partial match (e.g., "p1" matches "Pickleball Court P1")
+	for name, id := range nameToID {
+		if strings.Contains(name, lowerInput) || strings.Contains(lowerInput, name) {
+			return id, nil
+		}
+	}
+
+	// List available names for error message
+	var names []string
+	for _, f := range facilities {
+		names = append(names, f.Name)
+	}
+	return "", fmt.Errorf("court name %q not found. Available courts: %v", courtInput, names)
+}
+
+// isNumeric checks if a string contains only digits.
+func isNumeric(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+// parseFacilityHTML extracts facility IDs and names from the booking page HTML.
+// Matches <option value="ID">Name</option> patterns in the facility dropdown.
+func parseFacilityHTML(html string) []Facility {
+	var facilities []Facility
+
+	// Match option tags: <option value="ID">Name</option>
+	re := regexp.MustCompile(`<option\s+value="(\d+)"[^>]*>([^<]+)</option>`)
+	matches := re.FindAllStringSubmatch(html, -1)
+
+	for _, m := range matches {
+		id := m[1]
+		name := strings.TrimSpace(m[2])
+		if name != "" && name != "Select Facility" {
+			facilities = append(facilities, Facility{
+				ID:   id,
+				Name: name,
+			})
+		}
+	}
+
+	return facilities
 }
 
 // fetchCSRFToken loads the login page and extracts the CSRF token from the HTML.

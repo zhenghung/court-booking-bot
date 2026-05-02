@@ -14,15 +14,41 @@ type BookingEntry struct {
 	Courts []string // ordered by preference, e.g. ["7937", "7935"]
 }
 
-// Account represents a single booking account with its own credentials and plan.
+// Account represents a user account with booking credentials and preferences.
 type Account struct {
-	Name        string // display name for this account
+	Name        string
 	Email       string
 	Password    string
 	UnitID      string
 	BookingName string
 	Contact     string
 	BookingPlan []BookingEntry
+}
+
+// FillMissingProfileFromAPI fetches missing profile fields from the API after login.
+// This should be called after successful authentication.
+func (a *Account) FillMissingProfileFromAPI(baseURL string) error {
+	// Import api package to avoid circular dependency
+	// We'll handle this in the main package instead
+	return nil
+}
+
+// NeedsProfileAPI returns true if any profile fields are missing.
+func (a *Account) NeedsProfileAPI() bool {
+	return a.UnitID == "" || a.BookingName == "" || a.Contact == ""
+}
+
+// FillProfile populates missing profile fields from API response.
+func (a *Account) FillProfile(unitID, name, contact string) {
+	if a.UnitID == "" {
+		a.UnitID = unitID
+	}
+	if a.BookingName == "" {
+		a.BookingName = name
+	}
+	if a.Contact == "" {
+		a.Contact = contact
+	}
 }
 
 // Config holds the application configuration.
@@ -168,9 +194,10 @@ func Load() (*Config, error) {
 		if len(cfg.FacilityIDs) == 0 {
 			return nil, fmt.Errorf("GPROP_FACILITY_IDS must be set")
 		}
-		if cfg.UnitID == "" || cfg.BookingName == "" || cfg.Contact == "" {
-			return nil, fmt.Errorf("GPROP_UNIT_ID, GPROP_BOOKING_NAME, and GPROP_CONTACT must be set")
+		if cfg.UnitID == "" {
+			return nil, fmt.Errorf("GPROP_UNIT_ID must be set")
 		}
+		// Booking Name and Contact are optional - can be fetched from API after login
 
 		// Parse legacy booking plan
 		plan, err := parseBookingPlan(os.Getenv("GPROP_BOOKING_PLAN"))
