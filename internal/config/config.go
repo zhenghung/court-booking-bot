@@ -162,6 +162,17 @@ func Load() (*Config, error) {
 			contact = cfg.Contact
 		}
 
+		// Validate required fields
+		if unitID == "" {
+			return nil, fmt.Errorf("account %d: GPROP_ACCOUNT_%d_UNIT_ID (or global GPROP_UNIT_ID) must be set", i, i)
+		}
+		if bookingName == "" {
+			return nil, fmt.Errorf("account %d: GPROP_ACCOUNT_%d_BOOKING_NAME (or global GPROP_BOOKING_NAME) must be set", i, i)
+		}
+		if contact == "" {
+			return nil, fmt.Errorf("account %d: GPROP_ACCOUNT_%d_CONTACT (or global GPROP_CONTACT) must be set", i, i)
+		}
+
 		// Parse account-specific booking plan
 		rawPlan := os.Getenv(prefix + "BOOKING_PLAN")
 		plan, err := parseBookingPlan(rawPlan)
@@ -197,7 +208,12 @@ func Load() (*Config, error) {
 		if cfg.UnitID == "" {
 			return nil, fmt.Errorf("GPROP_UNIT_ID must be set")
 		}
-		// Booking Name and Contact are optional - can be fetched from API after login
+		if cfg.BookingName == "" {
+			return nil, fmt.Errorf("GPROP_BOOKING_NAME must be set")
+		}
+		if cfg.Contact == "" {
+			return nil, fmt.Errorf("GPROP_CONTACT must be set")
+		}
 
 		// Parse legacy booking plan
 		plan, err := parseBookingPlan(os.Getenv("GPROP_BOOKING_PLAN"))

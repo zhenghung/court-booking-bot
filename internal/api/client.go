@@ -21,15 +21,18 @@ type Client struct {
 	csrfToken  string
 }
 
-// NewClient creates a new API client with cookie jar for session management.
+// NewClient creates a new API client.
 func NewClient(baseURL string) *Client {
 	jar, _ := cookiejar.New(nil)
+	transport := &http.Transport{
+		DisableCompression: true, // Disable automatic decompression, we'll handle it manually
+	}
 
 	return &Client{
 		BaseURL: baseURL,
 		HTTPClient: &http.Client{
-			Jar:     jar,
-			Timeout: 10 * time.Second,
+			Transport: transport,
+			Jar:       jar,
 		},
 	}
 }
@@ -66,8 +69,12 @@ func (c *Client) Login(email, password string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create login request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Origin", c.BaseURL)
+	req.Header.Set("Referer", c.BaseURL+"/landing/parkcity-club-house")
+	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:150.0) Gecko/20100101 Firefox/150.0")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -421,6 +428,11 @@ func (c *Client) GetUserProfile() (*UserProfile, error) {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Origin", c.BaseURL)
+	req.Header.Set("Referer", c.BaseURL+"/booking/add_new_booking")
+	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:150.0) Gecko/20100101 Firefox/150.0")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -435,7 +447,7 @@ func (c *Client) GetUserProfile() (*UserProfile, error) {
 
 	var response UserAPIResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse user profile response: %w (body: %s)", err, string(body))
+		return nil, fmt.Errorf("failed to parse user profile response: %w", err)
 	}
 
 	if !response.Status {
@@ -460,6 +472,11 @@ func (c *Client) GetUnitUserProfile(unitID string) (*UserProfile, error) {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Origin", c.BaseURL)
+	req.Header.Set("Referer", c.BaseURL+"/booking/add_new_booking")
+	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:150.0) Gecko/20100101 Firefox/150.0")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -474,7 +491,7 @@ func (c *Client) GetUnitUserProfile(unitID string) (*UserProfile, error) {
 
 	var response UserUnitAPIResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse unit user profile response: %w (body: %s)", err, string(body))
+		return nil, fmt.Errorf("failed to parse unit user profile response: %w", err)
 	}
 
 	if !response.Status || len(response.Results) == 0 {

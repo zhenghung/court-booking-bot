@@ -115,26 +115,8 @@ func cmdProbe() {
 	fmt.Println("  Login successful!")
 	fmt.Println()
 
-	// Step 2: Fetch missing profile data from API if needed
-	if cfg.BookingName == "" || cfg.Contact == "" {
-		fmt.Println("[2/4] Fetching profile data from API...")
-		profile, err := client.GetUserProfile()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: Failed to fetch profile: %v\n", err)
-			os.Exit(1)
-		}
-		if cfg.BookingName == "" {
-			cfg.BookingName = profile.Name
-		}
-		if cfg.Contact == "" {
-			cfg.Contact = profile.Contact
-		}
-		fmt.Printf("  Profile fetched: Name=%s, Contact=%s\n", profile.Name, profile.Contact)
-		fmt.Println()
-	}
-
-	// Step 3: Resolve court names to IDs
-	fmt.Println("[3/4] Resolving court names...")
+	// Step 2: Resolve court names to IDs
+	fmt.Println("[2/4] Resolving court names...")
 	var resolvedFacilityIDs []string
 	for _, fid := range facilityIDs {
 		resolvedID, err := client.ResolveCourtNameToID(fid)
@@ -150,8 +132,8 @@ func cmdProbe() {
 	fmt.Println("  All courts resolved!")
 	fmt.Println()
 
-	// Step 4: Fetch timeslots for each court
-	fmt.Println("[4/4] Fetching timeslots...")
+	// Step 3: Get timeslots
+	fmt.Println("[3/4] Fetching timeslots...")
 	for _, fid := range resolvedFacilityIDs {
 		fmt.Printf("\n  Court %s:\n", fid)
 		slots, err := client.GetTimeslots(fid, targetDate)
@@ -217,26 +199,8 @@ func cmdBook() {
 	fmt.Println("  Login successful!")
 	fmt.Println()
 
-	// Step 2: Fetch missing profile data from API if needed
-	if cfg.BookingName == "" || cfg.Contact == "" {
-		fmt.Println("[2/5] Fetching profile data from API...")
-		profile, err := client.GetUserProfile()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: Failed to fetch profile: %v\n", err)
-			os.Exit(1)
-		}
-		if cfg.BookingName == "" {
-			cfg.BookingName = profile.Name
-		}
-		if cfg.Contact == "" {
-			cfg.Contact = profile.Contact
-		}
-		fmt.Printf("  Profile fetched: Name=%s, Contact=%s\n", profile.Name, profile.Contact)
-		fmt.Println()
-	}
-
-	// Step 3: Resolve court names to IDs
-	fmt.Println("[3/5] Resolving court names...")
+	// Step 2: Resolve court names to IDs
+	fmt.Println("[2/5] Resolving court names...")
 	var resolvedFacilityIDs []string
 	for _, fid := range facilityIDs {
 		resolvedID, err := client.ResolveCourtNameToID(fid)
@@ -252,8 +216,8 @@ func cmdBook() {
 	fmt.Println("  All courts resolved!")
 	fmt.Println()
 
-	// Step 4: Find an available court for the requested slot
-	fmt.Println("[4/5] Checking availability...")
+	// Step 3: Find an available court for the requested slot
+	fmt.Println("[3/5] Checking availability...")
 	var availableCourt string
 	for _, fid := range resolvedFacilityIDs {
 		slots, err := client.GetTimeslots(fid, targetDate)
@@ -287,9 +251,9 @@ func cmdBook() {
 		return
 	}
 
-	// Step 5: Book the slot
-	fmt.Println()
-	fmt.Printf("[5/5] Booking court %s, %s on %s...\n", availableCourt, *timeSlot, targetDate)
+	// Step 4: Book the slot
+	fmt.Println("[4/5] Booking slot...")
+	fmt.Printf("  Booking court %s, %s on %s...\n", availableCourt, *timeSlot, targetDate)
 	result, err := client.BookSlot(availableCourt, cfg.UnitID, cfg.BookingName, cfg.Contact, targetDate, *timeSlot)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
@@ -391,23 +355,6 @@ func cmdRun() {
 			os.Exit(1)
 		}
 		fmt.Println("OK")
-
-		// Fetch missing profile data from API if needed
-		if acc.BookingName == "" || acc.Contact == "" {
-			fmt.Printf("  %s: fetching profile... ", acc.Name)
-			profile, err := client.GetUserProfile()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: Failed to fetch profile: %v\n", err)
-				os.Exit(1)
-			}
-			if acc.BookingName == "" {
-				acc.BookingName = profile.Name
-			}
-			if acc.Contact == "" {
-				acc.Contact = profile.Contact
-			}
-			fmt.Println("OK")
-		}
 
 		clients[i] = client
 	}

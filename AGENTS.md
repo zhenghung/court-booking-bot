@@ -131,23 +131,7 @@ The browser uses these endpoints to fetch profile data after login:
 - `POST /booking/get_user_info` - Returns user profile (name, contact)
 - `POST /booking/get_unit_user` - Returns unit-specific profile (requires unitId parameter)
 
-**Important**: 
-- Booking Name and Contact CAN be fetched from API after login
-- Unit ID CANNOT be fetched from API - must be provided in .env file
-
-**Response Structure**:
-```json
-{
-  "status": true,
-  "results": {
-    "fldName": "YOUR NAME",
-    "fldContact": "60123456789",
-    ...
-  }
-}
-```
-
-The `get_user_info` endpoint returns a single object in `results`, while `get_unit_user` returns an array.
+**Note**: The bot currently hardcodes `GPROP_BOOKING_NAME` and `GPROP_CONTACT` in the `.env` file instead of fetching from the API due to gzip decompression issues with the API responses.
 
 ## Configuration
 
@@ -159,16 +143,14 @@ The `get_user_info` endpoint returns a single object in `results`, while `get_un
 | `GPROP_PASSWORD` | Login password | Yes |
 | `GPROP_FACILITY_IDS` | Comma-separated court IDs or names | Yes |
 | `GPROP_UNIT_ID` | Unit/apartment ID | Yes |
-| `GPROP_BOOKING_NAME` | Name for booking | No (fetched from API) |
-| `GPROP_CONTACT` | Contact number | No (fetched from API) |
+| `GPROP_BOOKING_NAME` | Name for booking | Yes |
+| `GPROP_CONTACT` | Contact number | Yes |
 | `GPROP_TARGET_DAY` | Day of week to book (e.g., "friday") | Yes |
 | `GPROP_BOOKING_PLAN` | Slots and court priority | Yes |
 | `GPROP_TELEGRAM_BOT_TOKEN` | Telegram bot token | No (for notifications) |
 | `GPROP_TELEGRAM_CHAT_ID` | Telegram chat/group ID | No (for notifications) |
 
 **Court Name Support**: `GPROP_FACILITY_IDS` and `GPROP_BOOKING_PLAN` can use either numeric IDs (e.g., `7935`) or court names (e.g., `Pickleball Court P1`). Court names support case-insensitive partial matching (e.g., `P1` matches `Pickleball Court P1`).
-
-**Profile Auto-fetch**: `GPROP_BOOKING_NAME` and `GPROP_CONTACT` are automatically fetched from the API after login if not provided. `GPROP_UNIT_ID` must still be provided as it's not available from the API.
 
 ### Multi-Account (optional)
 
