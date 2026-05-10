@@ -27,6 +27,8 @@ GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot
 | `./court-bot book --time 07:00-08:00` | Book a specific timeslot |
 | `./court-bot run --now --dry-run` | Test scheduler without booking |
 | `./court-bot bot` | Run Telegram bot daemon |
+| `./court-bot facilities` | List all available courts with IDs and names |
+| `./court-bot health-check` | Test login functionality and alert on failure |
 
 ### Telegram Commands
 
@@ -52,6 +54,7 @@ GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot
 | `/home/ubuntu/court-bot` | Binary |
 | `/home/ubuntu/.env` | Configuration |
 | `/home/ubuntu/court-bot.log` | Cron output log |
+| `/home/ubuntu/health-check.log` | Health check log |
 
 ### Deploy Updated Binary
 
@@ -82,8 +85,11 @@ sudo systemctl restart court-bot
 ### Cron Schedule
 
 - Configured via `crontab -e` on server
-- Format: `0 0 * * 5` = Friday 00:00 MYT
-- Runs: `./court-bot run --now`
+- **Booking schedule**: `0 0 * * 5` = Friday 00:00 MYT
+  - Runs: `./court-bot run --now`
+- **Health check schedule**: `0 8 * * *` = Daily 08:00 MYT
+  - Runs: `./court-bot health-check`
+  - Sends Telegram alert on login failure only
 
 ## Code Structure
 

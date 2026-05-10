@@ -40,6 +40,8 @@ func main() {
 		cmdBot()
 	case "facilities":
 		cmdFacilities()
+	case "health-check":
+		cmdHealthCheck()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -51,12 +53,13 @@ func printUsage() {
 	fmt.Println("Usage: court-bot <command> [flags]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  ping        Test HTTP connectivity to gpropsystems")
-	fmt.Println("  probe       Login and fetch timeslots for a given date")
-	fmt.Println("  book        Book a specific timeslot (tries all courts)")
-	fmt.Println("  run         Scheduler: wait for midnight and auto-book target slots")
-	fmt.Println("  bot         Run Telegram bot daemon (listens for /status and /setday)")
-	fmt.Println("  facilities  List all available courts with their IDs and names")
+	fmt.Println("  ping         Test HTTP connectivity to gpropsystems")
+	fmt.Println("  probe        Login and fetch timeslots for a given date")
+	fmt.Println("  book         Book a specific timeslot (tries all courts)")
+	fmt.Println("  run          Scheduler: wait for midnight and auto-book target slots")
+	fmt.Println("  bot          Run Telegram bot daemon (listens for /status and /setday)")
+	fmt.Println("  facilities   List all available courts with their IDs and names")
+	fmt.Println("  health-check Test login functionality and alert on failure")
 	fmt.Println()
 	fmt.Println("Run 'court-bot <command> --help' for command flags.")
 }
@@ -955,7 +958,40 @@ func parseDayOfWeek(s string) (time.Weekday, error) {
 	}
 	day, ok := days[strings.ToLower(s)]
 	if !ok {
-		return 0, fmt.Errorf("invalid day of week: %q (use monday, tuesday, etc.)", s)
+		return time.Sunday, fmt.Errorf("invalid day: %s", s)
 	}
 	return day, nil
+}
+
+func cmdHealthCheck() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("[1/2] Testing login...")
+	client := api.NewClient(cfg.BaseURL)
+	if err := client.Login(cfg.Email, cfg.Password); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: Login failed: %v\n", err)
+		fmt.Println("[2/2] Sending alert to Telegram...")
+
+		// Send Telegram notification on failure
+		if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+			message := fmt.Sprintf("🚨 Court Bot Health Check Failed\n\nLogin failed for court booking bot.\n\nError: %v\n\nTime: %s", err, time.Now().Format("2006-01-02 15:04:05"))
+			if err := sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, message); err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: Failed to send Telegram notification: %v\n", err)
+			} else {
+				fmt.Println("  Alert sent successfully")
+			}
+		} else {
+			fmt.Println("  WARNING: Telegram credentials not set, skipping notification")
+		}
+
+		os.Exit(1)
+	}
+
+	fmt.Println("  Login successful!")
+	fmt.Println("[2/2] Health check passed")
+	fmt.Println("✓ Login is working correctly")
 }
