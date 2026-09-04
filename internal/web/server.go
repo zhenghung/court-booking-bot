@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -113,6 +114,8 @@ const (
 	sessionCookie = "courtbot_session"
 	sessionTTL    = 24 * time.Hour
 )
+
+var slotRe = regexp.MustCompile(`^\d{2}:\d{2}-\d{2}:\d{2}$`)
 
 func NewServer(opts ServerOptions) *Server {
 	return &Server{
@@ -234,7 +237,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.sessions[tok] = session{csrf: csrf, expires: time.Now().Add(sessionTTL)}
+	now := time.Now()
+	for k, v := range s.sessions {
+		if now.After(v.expires) {
+			delete(s.sessions, k)
+		}
+	}
+	s.sessions[tok] = session{csrf: csrf, expires: now.Add(sessionTTL)}
 	s.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -354,6 +363,9 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 			if p = strings.TrimSpace(p); p != "" {
 				courts = append(courts, p)
 			}
+			if len(courts) >= 20 {
+				break
+			}
 		}
 	}
 	res, err := s.backend.Probe(date, courts)
@@ -387,6 +399,10 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
 		writeErr(w, http.StatusBadRequest, "date must be YYYY-MM-DD")
+		return
+	}
+	if !slotRe.MatchString(req.Time) {
+		writeErr(w, http.StatusBadRequest, "time must be HH:MM-HH:MM")
 		return
 	}
 	res, err := s.backend.Book(req)

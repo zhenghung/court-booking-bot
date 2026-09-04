@@ -120,6 +120,21 @@ func TestBookRejectsBadDate(t *testing.T) {
 	}
 }
 
+func TestBookRejectsBadTime(t *testing.T) {
+	s := newTestServer()
+	cookies, csrf := loginCookies(t, s)
+	r := httptest.NewRequest(http.MethodPost, "/api/book", strings.NewReader(`{"date":"2026-09-12","time":"whenever","dryRun":true}`))
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	r.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("book bad time = %d, want 400", w.Code)
+	}
+}
+
 func TestLoginWrongPassword(t *testing.T) {
 	s := newTestServer()
 	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"nope"}`))

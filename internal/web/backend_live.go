@@ -3,8 +3,8 @@ package web
 import (
 	"fmt"
 	"log"
-	"strings"
 	"time"
+	"unicode"
 
 	"github.com/zhenghung/court-booking-bot/internal/api"
 	"github.com/zhenghung/court-booking-bot/internal/config"
@@ -64,7 +64,8 @@ func titleDay(s string) string {
 	if s == "" {
 		return s
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	r := []rune(s)
+	return string(unicode.ToUpper(r[0])) + string(r[1:])
 }
 
 func (b *LiveBackend) loginClient(email, password string) (*api.Client, error) {

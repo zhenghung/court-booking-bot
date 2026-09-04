@@ -1113,6 +1113,10 @@ func cmdServe() {
 		fmt.Fprintln(os.Stderr, "ERROR: UI_PASSWORD must be set to run the web UI")
 		os.Exit(1)
 	}
+	if len(cfg.UIPassword) < 16 {
+		fmt.Fprintln(os.Stderr, "ERROR: UI_PASSWORD must be at least 16 characters")
+		os.Exit(1)
+	}
 	if len(cfg.Accounts) == 0 {
 		fmt.Fprintln(os.Stderr, "ERROR: no accounts configured")
 		os.Exit(1)

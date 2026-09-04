@@ -29,7 +29,9 @@ function show(view) {
 function defaultDatePlus7() {
   const d = new Date();
   d.setDate(d.getDate() + 7);
-  return d.toISOString().slice(0, 10);
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
 }
 
 async function loadStatus() {
@@ -48,7 +50,9 @@ async function loadStatus() {
 function startCountdown(targetDate) {
   const el = document.getElementById("countdown");
   if (!targetDate) { el.textContent = "—"; return; }
-  const midnight = new Date(targetDate + "T00:00:00");
+  // KL midnight (UTC+8) as an instant, correct in any browser timezone.
+  const [y, mo, d] = targetDate.split("-").map(Number);
+  const midnight = Date.UTC(y, mo - 1, d) - 8 * 3600000;
   function tick() {
     const ms = midnight - new Date();
     if (ms <= 0) { el.textContent = "window open"; return; }
@@ -73,9 +77,11 @@ async function loadBookings() {
 }
 
 async function probe() {
+  const btn = document.getElementById("probeBtn");
   const box = document.getElementById("probeBox");
   const date = document.getElementById("probeDate").value || defaultDatePlus7();
   const courts = document.getElementById("probeCourts").value;
+  btn.disabled = true;
   box.textContent = "Checking…";
   try {
     const data = await api(`/api/probe?date=${encodeURIComponent(date)}&courts=${encodeURIComponent(courts)}`);
@@ -106,6 +112,7 @@ async function probe() {
       };
     }
   } catch (e) { box.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+  finally { btn.disabled = false; }
 }
 
 async function book() {
