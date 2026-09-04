@@ -403,13 +403,19 @@ func cmdRun() {
 
 		// Poll primary facility first (fast check) — resolve once before loop
 		primaryCourt := "" // first court of first booking entry
-		if len(cfg.Accounts) > 0 && len(cfg.Accounts[0].BookingPlan) > 0 {
+		if len(cfg.Accounts) > 0 && len(cfg.Accounts[0].BookingPlan) > 0 &&
+			len(cfg.Accounts[0].BookingPlan[0].Courts) > 0 {
 			primaryCourt = cfg.Accounts[0].BookingPlan[0].Courts[0]
+		}
+		if primaryCourt == "" {
+			fmt.Fprintln(os.Stderr, "ERROR: no courts configured for poll, proceeding to midnight wait")
 		}
 		resolvedID := primaryCourt
 		if !api.IsNumeric(resolvedID) && resolvedID != "" {
 			if rid, err := clients[0].ResolveCourtNameToID(resolvedID); err == nil {
 				resolvedID = rid
+			} else {
+				fmt.Fprintf(os.Stderr, "WARN: failed to resolve poll court %q: %v — polls will likely fail, continuing to midnight\n", resolvedID, err)
 			}
 		}
 
@@ -454,11 +460,20 @@ func cmdRun() {
 		}
 		ticker.Stop()
 
-		// Final wait until exact midnight if we broke early before midnight
+		// Final wait until exact midnight if we broke early before midnight.
+		// Never book before midnight — clamp early flip to midnight.
 		if fireTime.IsZero() {
 			remaining := time.Until(midnight)
 			if remaining > 0 {
 				fmt.Printf("  Final wait: %s\n", remaining.Round(time.Millisecond))
+				time.Sleep(remaining)
+			}
+			fireTime = time.Now()
+			fmt.Printf("  MIDNIGHT! %s (polls=%d)\n", fireTime.Format("15:04:05.000"), pollAttempts)
+		} else if fireTime.Before(midnight) {
+			remaining := time.Until(midnight)
+			fmt.Printf("  Early flip at %s, waiting %s until midnight...\n", fireTime.Format("15:04:05.000"), remaining.Round(time.Millisecond))
+			if remaining > 0 {
 				time.Sleep(remaining)
 			}
 			fireTime = time.Now()
@@ -583,7 +598,8 @@ func cmdRun() {
 
 func sendTelegramMessage(botToken, chatID, message string) error {
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
-	resp, err := http.PostForm(endpoint, url.Values{
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.PostForm(endpoint, url.Values{
 		"chat_id": {chatID},
 		"text":    {message},
 	})
@@ -672,7 +688,8 @@ func cmdBot() {
 
 func getTelegramUpdates(botToken string, offset int64) ([]TelegramUpdate, error) {
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30", botToken, offset)
-	resp, err := http.Get(endpoint)
+	httpClient := &http.Client{Timeout: 45 * time.Second}
+	resp, err := httpClient.Get(endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -1047,11 +1064,6 @@ func parseDayOfWeek(s string) (time.Weekday, error) {
 		return time.Sunday, fmt.Errorf("invalid day: %s", s)
 	}
 	return day, nil
-}
-
-// isNumeric retained for local use; canonical impl is api.IsNumeric.
-func isNumeric(s string) bool {
-	return api.IsNumeric(s)
 }
 
 func cmdHealthCheck() {

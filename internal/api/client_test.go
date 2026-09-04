@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -28,6 +30,37 @@ func TestLoginRetriesOnTimeout(t *testing.T) {
 	// Minimal: isRetryable covers transient detection; full Login retry covered by integration probe
 	if !isRetryableError(fmt.Errorf("dial tcp timeout")) {
 		t.Fatal("expected retryable")
+	}
+}
+
+func TestLoginRetriesOn500ThenSucceeds(t *testing.T) {
+	var posts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			w.Write([]byte(`<html><script>csrf_token = 'testtoken1234567890';</script></html>`))
+			return
+		}
+		if r.URL.Path == "/login/login_data_submit" {
+			n := atomic.AddInt32(&posts, 1)
+			if n <= 2 {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("boom"))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"msg":"Logged In Successfully","_co6sO0rpsfat":"newtoken123"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.Login("a@example.com", "pw"); err != nil {
+		t.Fatalf("Login should succeed after 500 retries, got: %v", err)
+	}
+	if got := atomic.LoadInt32(&posts); got != 3 {
+		t.Fatalf("expected 3 POST attempts, got %d", got)
 	}
 }
 

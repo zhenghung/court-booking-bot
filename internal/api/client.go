@@ -53,7 +53,9 @@ func isRetryableError(err error) bool {
 		strings.Contains(s, "connection reset") ||
 		strings.Contains(s, "client.timeout") ||
 		strings.Contains(s, "context deadline exceeded") ||
-		strings.Contains(s, "timeout")
+		strings.Contains(s, "timeout") ||
+		strings.Contains(s, "returned status 5") ||
+		strings.Contains(s, "status 5")
 }
 
 // Ping makes a GET request to the base URL and returns the HTTP status.
@@ -97,7 +99,11 @@ func (c *Client) loginOnce(email, password string) error {
 		return fmt.Errorf("failed to fetch CSRF token: %w", err)
 	}
 	c.csrfToken = csrfToken
-	fmt.Printf("  CSRF token: %s...%s\n", csrfToken[:8], csrfToken[len(csrfToken)-4:])
+	preview := csrfToken
+	if len(csrfToken) > 12 {
+		preview = csrfToken[:8] + "..." + csrfToken[len(csrfToken)-4:]
+	}
+	fmt.Printf("  CSRF token: %s\n", preview)
 
 	// Step 2: POST login credentials
 	form := url.Values{}
