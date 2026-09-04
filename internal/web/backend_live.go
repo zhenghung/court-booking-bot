@@ -35,7 +35,8 @@ func klNow() time.Time {
 }
 
 func (b *LiveBackend) Status() StatusPayload {
-	targetDate := klNow().AddDate(0, 0, 7).Format("2006-01-02")
+	now := klNow()
+	targetDate := now.AddDate(0, 0, 7).Format("2006-01-02")
 	var accounts []AccountView
 	var plan []string
 	for _, acc := range b.cfg.Accounts {
@@ -47,9 +48,37 @@ func (b *LiveBackend) Status() StatusPayload {
 	return StatusPayload{
 		TargetDay:   titleDay(b.cfg.TargetDay),
 		TargetDate:  targetDate,
+		NextRun:     nextRun(now, b.cfg.TargetDay),
 		Accounts:    accounts,
 		BookingPlan: plan,
 	}
+}
+
+// nextRun returns the next midnight (KL) whose weekday matches targetDay,
+// mirroring the cron snipe schedule. Empty string if day unparseable.
+func nextRun(now time.Time, targetDay string) string {
+	days := map[string]time.Weekday{
+		"sunday": time.Sunday, "sun": time.Sunday,
+		"monday": time.Monday, "mon": time.Monday,
+		"tuesday": time.Tuesday, "tue": time.Tuesday,
+		"wednesday": time.Wednesday, "wed": time.Wednesday,
+		"thursday": time.Thursday, "thu": time.Thursday,
+		"friday": time.Friday, "fri": time.Friday,
+		"saturday": time.Saturday, "sat": time.Saturday,
+	}
+	want, ok := days[strings.ToLower(strings.TrimSpace(targetDay))]
+	if !ok {
+		return ""
+	}
+	d := now
+	for d.Weekday() != want {
+		d = d.AddDate(0, 0, 1)
+	}
+	midnight := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, now.Location())
+	if midnight.Before(now) {
+		midnight = midnight.AddDate(0, 0, 7)
+	}
+	return midnight.Format("Mon Jan 2, 15:04")
 }
 
 func join(ss []string, sep string) string {
