@@ -6,6 +6,7 @@ Bot: Go CLI for gpropsystems court booking. Cron + Telegram on Oracle ARM VM.
 
 ```bash
 go build -o court-bot ./cmd/bot
+go test ./...
 ./court-bot ping
 ./court-bot probe --date 2026-03-06
 GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot

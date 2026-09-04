@@ -15,7 +15,17 @@ Purpose: deploy and schedule the bot on Oracle Cloud. Audience: humans.
 GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot
 scp -i ssh-key-*.key court-bot-linux-arm64 ubuntu@149.118.140.17:/home/ubuntu/court-bot
 ssh -i ssh-key-*.key ubuntu@149.118.140.17 "chmod +x ~/court-bot && ./court-bot ping"
+ssh -i ssh-key-*.key ubuntu@149.118.140.17 "cd ~ && ./court-bot run --now --dry-run"
 ```
+
+## Cron
+
+| Schedule | Command | Purpose |
+|----------|---------|---------|
+| `0 0 * * 5` | `./court-bot run --now` | Booking snipe Friday 00:00 MYT |
+| `0 8 * * *` | `./court-bot health-check` | Daily login check, alerts on failure only |
+
+Cron weekday follows `GPROP_TARGET_DAY` (change via `/setday`, see [operations](operations.md)).
 
 ## Cron
 

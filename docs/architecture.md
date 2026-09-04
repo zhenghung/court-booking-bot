@@ -209,3 +209,8 @@ sequenceDiagram
 - `POST /booking/get_booking_timeslot`: timeslots per facility + date
 - `POST /booking/add_new_booking_action`: create booking (multipart otherData)
 - `GET /booking/booking_listing`: bookings from today onwards
+
+Note: `GetUserProfile` / `GetUnitUserProfile` (`POST /booking/get_user_info`,
+`POST /booking/get_unit_user`) exist in `client.go` but are unused — profile
+fields stay hardcoded in `.env` due to gzip decompression issues with those
+API responses.

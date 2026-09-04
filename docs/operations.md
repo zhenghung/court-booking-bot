@@ -20,7 +20,7 @@ GPROP_BOOKING_PLAN=07:00-08:00>7935,7937,7936;08:00-09:00>7937,7936,7935
 ## Rotate Telegram token
 
 Message @BotFather, revoke, copy new token, update local + server `.env`,
-restart service.
+restart the `bot` daemon if running (no systemd unit — it runs manually).
 
 ## Troubleshooting
 
