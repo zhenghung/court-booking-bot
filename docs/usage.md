@@ -13,6 +13,7 @@ Purpose: every CLI and Telegram command in one place. Audience: humans.
 | `./court-bot bot` | Run Telegram bot daemon |
 | `./court-bot facilities` | List all available courts with IDs and names |
 | `./court-bot health-check` | Test login functionality and alert on failure |
+| `./court-bot serve` | Run embedded web UI (dashboard, bookings, probe, book) |
 
 ```bash
 ./court-bot ping
@@ -23,6 +24,14 @@ Purpose: every CLI and Telegram command in one place. Audience: humans.
 ```
 
 `run` computes target booking date as **today + 7 days**.
+
+## Web UI
+
+`UI_PASSWORD=... ./court-bot serve` hosts the ops console (default `:8080`,
+see [configuration](configuration.md) for `UI_*` vars and
+[deployment](deployment.md) for server setup). Dashboard, bookings, probe grid,
+and book (dry-run default, confirm required for live). Avoid 23:59–00:01 on
+snipe night — cron owns that window.
 
 ## Telegram
 

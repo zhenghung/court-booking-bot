@@ -1,0 +1,201 @@
+package web
+
+import (
+	"fmt"
+	"log"
+	"strings"
+	"time"
+
+	"github.com/zhenghung/court-booking-bot/internal/api"
+	"github.com/zhenghung/court-booking-bot/internal/config"
+)
+
+// LiveBackend serves API data from gpropsystems via existing clients.
+type LiveBackend struct {
+	cfg *config.Config
+}
+
+func NewLiveBackend(cfg *config.Config) *LiveBackend {
+	return &LiveBackend{cfg: cfg}
+}
+
+func (b *LiveBackend) primaryAccount() config.Account {
+	return b.cfg.Accounts[0]
+}
+
+func (b *LiveBackend) Status() StatusPayload {
+	today := time.Now()
+	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
+	var accounts []AccountView
+	var plan []string
+	for _, acc := range b.cfg.Accounts {
+		accounts = append(accounts, AccountView{Name: acc.Name})
+		for _, e := range acc.BookingPlan {
+			plan = append(plan, e.Slot+" > "+join(e.Courts, ","))
+		}
+	}
+	return StatusPayload{
+		TargetDay:   titleDay(b.cfg.TargetDay),
+		TargetDate:  targetDate,
+		Accounts:    accounts,
+		BookingPlan: plan,
+	}
+}
+
+func join(ss []string, sep string) string {
+	out := ""
+	for i, s := range ss {
+		if i > 0 {
+			out += sep
+		}
+		out += s
+	}
+	return out
+}
+
+// titleDay capitalizes the day name for display ("friday" -> "Friday").
+func titleDay(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func (b *LiveBackend) loginClient(email, password string) (*api.Client, error) {
+	c := api.NewClient(b.cfg.BaseURL)
+	if err := c.Login(email, password); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (b *LiveBackend) Facilities() ([]FacilityView, error) {
+	acc := b.primaryAccount()
+	c, err := b.loginClient(acc.Email, acc.Password)
+	if err != nil {
+		return nil, err
+	}
+	fac, err := c.GetFacilities()
+	if err != nil {
+		return nil, err
+	}
+	var out []FacilityView
+	for _, f := range fac {
+		out = append(out, FacilityView{ID: f.ID, Name: f.Name})
+	}
+	return out, nil
+}
+
+func (b *LiveBackend) Bookings() ([]AccountBookings, error) {
+	var out []AccountBookings
+	for _, acc := range b.cfg.Accounts {
+		c, err := b.loginClient(acc.Email, acc.Password)
+		if err != nil {
+			out = append(out, AccountBookings{Account: acc.Name, Error: err.Error()})
+			continue
+		}
+		bl, err := c.GetBookings()
+		if err != nil {
+			out = append(out, AccountBookings{Account: acc.Name, Error: err.Error()})
+			continue
+		}
+		ab := AccountBookings{Account: acc.Name}
+		for _, x := range bl {
+			ab.Bookings = append(ab.Bookings, BookingView{
+				Date:     x.Date,
+				Time:     shortTime(x.TimeStart) + "-" + shortTime(x.TimeEnd),
+				Facility: x.Facility,
+				Status:   x.Status,
+			})
+		}
+		out = append(out, ab)
+	}
+	return out, nil
+}
+
+func shortTime(t string) string {
+	if len(t) >= 5 {
+		return t[:5]
+	}
+	return t
+}
+
+func (b *LiveBackend) Probe(date string, courts []string) (ProbeResult, error) {
+	acc := b.primaryAccount()
+	c, err := b.loginClient(acc.Email, acc.Password)
+	if err != nil {
+		return ProbeResult{}, err
+	}
+	if len(courts) == 0 {
+		courts = append(courts, b.cfg.FacilityIDs...)
+	}
+	res := ProbeResult{Date: date}
+	for _, court := range courts {
+		rid, err := c.ResolveCourtNameToID(court)
+		if err != nil {
+			res.Courts = append(res.Courts, CourtSlots{ID: court, Name: court, Error: err.Error()})
+			continue
+		}
+		slots, err := c.GetTimeslots(rid, date)
+		if err != nil {
+			res.Courts = append(res.Courts, CourtSlots{ID: rid, Name: court, Error: err.Error()})
+			continue
+		}
+		cs := CourtSlots{ID: rid, Name: court}
+		for _, s := range slots {
+			cs.Slots = append(cs.Slots, SlotView{Time: s.Time, Available: s.Available})
+		}
+		res.Courts = append(res.Courts, cs)
+	}
+	return res, nil
+}
+
+func (b *LiveBackend) Book(req BookRequest) (BookResponse, error) {
+	acc := b.primaryAccount()
+	c, err := b.loginClient(acc.Email, acc.Password)
+	if err != nil {
+		return BookResponse{}, err
+	}
+	courts := []string{req.FacilityID}
+	if req.FacilityID == "" {
+		courts = append([]string{}, b.cfg.FacilityIDs...)
+	}
+	var target string
+	for _, court := range courts {
+		rid, err := c.ResolveCourtNameToID(court)
+		if err != nil {
+			continue
+		}
+		slots, err := c.GetTimeslots(rid, req.Date)
+		if err != nil {
+			continue
+		}
+		for _, s := range slots {
+			if s.Time == req.Time && s.Available {
+				target = rid
+				break
+			}
+		}
+		if target != "" {
+			break
+		}
+	}
+	if target == "" {
+		log.Printf("UI book: date=%s time=%s dryRun=%v result=no-availability", req.Date, req.Time, req.DryRun)
+		return BookResponse{DryRun: req.DryRun, Message: fmt.Sprintf("%s not available on tried courts for %s", req.Time, req.Date)}, nil
+	}
+	if req.DryRun {
+		log.Printf("UI book dry-run: date=%s time=%s court=%s", req.Date, req.Time, target)
+		return BookResponse{DryRun: true, Court: target, Message: fmt.Sprintf("Would book court %s, %s on %s", target, req.Time, req.Date)}, nil
+	}
+	result, err := c.BookSlot(target, acc.UnitID, acc.BookingName, acc.Contact, req.Date, req.Time)
+	if err != nil {
+		log.Printf("UI book error: date=%s time=%s court=%s err=%v", req.Date, req.Time, target, err)
+		return BookResponse{}, err
+	}
+	log.Printf("UI book live: date=%s time=%s court=%s status=%v insertID=%d", req.Date, req.Time, target, result.Status, result.InsertID)
+	if result.Status {
+		return BookResponse{Court: target, Booked: true, InsertID: result.InsertID, Message: result.Msg}, nil
+	}
+	return BookResponse{Court: target, Message: result.MsgTitle + " - " + result.Msg}, nil
+}

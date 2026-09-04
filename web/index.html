@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Court Bot Console</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="midnight-band">
+  <div><strong>Court Bot Console</strong> <span id="targetLine" class="hint"></span></div>
+  <div class="countdown" id="countdown">—</div>
+</div>
+
+<section id="loginView" class="card" style="max-width:420px;margin:24px auto;">
+  <h2>Log in</h2>
+  <p class="hint">Single admin password from server env.</p>
+  <label for="pw">Password</label>
+  <input id="pw" type="password" autocomplete="current-password">
+  <p><button class="primary" id="loginBtn">Log in</button></p>
+  <p class="error" id="loginErr"></p>
+</section>
+
+<div id="app" hidden>
+  <nav class="tabs" role="tablist">
+    <button data-view="dashboard" class="active">Dashboard</button>
+    <button data-view="bookings">Bookings</button>
+    <button data-view="probe">Probe</button>
+    <button data-view="book">Book</button>
+    <button id="logoutBtn" style="margin-left:auto">Log out</button>
+  </nav>
+  <main>
+    <section id="view-dashboard" class="card"><h2>Status</h2><div id="statusBox">Loading…</div></section>
+    <section id="view-bookings" class="card" hidden><h2>Upcoming bookings</h2><div id="bookingsBox">Loading…</div></section>
+    <section id="view-probe" class="card" hidden>
+      <h2>Probe availability</h2>
+      <label for="probeDate">Date</label>
+      <input id="probeDate" type="date">
+      <label for="probeCourts">Courts (comma separated, blank = configured)</label>
+      <input id="probeCourts" type="text" placeholder="P1,P2,P3">
+      <p><button class="primary" id="probeBtn">Check availability</button></p>
+      <div class="sheet-wrap" id="probeBox"></div>
+    </section>
+    <section id="view-book" class="card" hidden>
+      <h2>Book a slot</h2>
+      <p class="hint">Avoid 23:59–00:01 on snipe night — cron owns that window. Dry run first.</p>
+      <label for="bookDate">Date (YYYY-MM-DD)</label><input id="bookDate" type="date">
+      <label for="bookTime">Time (HH:MM-HH:MM)</label><input id="bookTime" type="text" placeholder="07:00-08:00">
+      <label for="bookCourt">Court (optional — blank tries plan order)</label><input id="bookCourt" type="text" placeholder="P1">
+      <p><label><input id="bookDry" type="checkbox" checked> Dry run</label></p>
+      <p><label><input id="bookConfirm" type="checkbox"> Book P1 — I confirm live booking</label></p>
+      <p><button class="primary" id="bookBtn">Check / Book</button></p>
+      <div id="bookBox"></div>
+    </section>
+  </main>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

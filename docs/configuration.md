@@ -32,3 +32,11 @@ Use `GPROP_ACCOUNT_N_*` variables for multiple accounts (N = 1, 2, 3...):
 | `GPROP_ACCOUNT_N_BOOKING_PLAN` | Account-specific booking plan |
 
 Each account can book up to 2 hours/week, so 2 accounts = 4 hours total.
+
+## Web UI
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `UI_PASSWORD` | Admin password for `./court-bot serve` login | Yes (to serve) |
+| `UI_PORT` | Port to listen on (default `8080`) | No |
+| `UI_BIND` | Bind address (default `0.0.0.0`) | No |
