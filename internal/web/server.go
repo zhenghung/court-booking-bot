@@ -147,17 +147,16 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func randomToken(n int) string {
+func randomToken(n int) (string, error) {
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
+	// RemoteAddr only — no trusted proxy in front, so X-Forwarded-For is spoofable.
 	host := r.RemoteAddr
 	if i := strings.LastIndex(host, ":"); i >= 0 {
 		return host[:i]
@@ -213,6 +212,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Password string `json:"password"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
@@ -223,8 +223,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.clearFails(ip)
-	tok := randomToken(32)
-	csrf := randomToken(32)
+	tok, err := randomToken(32)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "login unavailable")
+		return
+	}
+	csrf, err := randomToken(32)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "login unavailable")
+		return
+	}
 	s.mu.Lock()
 	s.sessions[tok] = session{csrf: csrf, expires: time.Now().Add(sessionTTL)}
 	s.mu.Unlock()
@@ -240,6 +248,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
 	c, err := r.Cookie(sessionCookie)
 	if err == nil {
 		s.mu.Lock()
@@ -332,6 +344,10 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "date required (YYYY-MM-DD)")
 		return
 	}
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		writeErr(w, http.StatusBadRequest, "date must be YYYY-MM-DD")
+		return
+	}
 	var courts []string
 	if c := strings.TrimSpace(r.URL.Query().Get("courts")); c != "" {
 		for _, p := range strings.Split(c, ",") {
@@ -354,6 +370,7 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req BookRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
@@ -366,6 +383,10 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	}
 	if !req.DryRun && !req.Confirm {
 		writeErr(w, http.StatusBadRequest, "live booking requires confirm:true")
+		return
+	}
+	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
+		writeErr(w, http.StatusBadRequest, "date must be YYYY-MM-DD")
 		return
 	}
 	res, err := s.backend.Book(req)

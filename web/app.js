@@ -1,5 +1,9 @@
 let csrf = "";
 
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     credentials: "same-origin",
@@ -33,12 +37,12 @@ async function loadStatus() {
   try {
     const s = await api("/api/status");
     document.getElementById("targetLine").textContent = `Target ${s.targetDay || ""} · ${s.targetDate || ""}`;
-    box.innerHTML = `<p>Target day: <strong>${s.targetDay || "—"}</strong></p>
-      <p>Target date: <strong>${s.targetDate || "—"}</strong></p>
-      <p>Next run: <strong>${s.nextRun || "—"}</strong></p>
-      <h3>Accounts</h3><ul>${(s.accounts || []).map(a => `<li>${a.name}</li>`).join("")}</ul>`;
+    box.innerHTML = `<p>Target day: <strong>${esc(s.targetDay) || "—"}</strong></p>
+      <p>Target date: <strong>${esc(s.targetDate) || "—"}</strong></p>
+      <p>Next run: <strong>${esc(s.nextRun) || "—"}</strong></p>
+      <h3>Accounts</h3><ul>${(s.accounts || []).map(a => `<li>${esc(a.name)}</li>`).join("")}</ul>`;
     startCountdown(s.targetDate);
-  } catch (e) { box.innerHTML = `<p class="error">${e.message}</p>`; }
+  } catch (e) { box.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
 }
 
 function startCountdown(targetDate) {
@@ -62,10 +66,10 @@ async function loadBookings() {
   try {
     const data = await api("/api/bookings");
     box.innerHTML = (data.accounts || []).map(a =>
-      `<h3>${a.account}</h3>` + (a.error ? `<p class="error">${a.error}</p>` :
-        (a.bookings || []).map(b => `<p>${b.date} · ${b.time} · ${b.facility} · ${b.status}</p>`).join("") || "<p>No bookings.</p>")
+      `<h3>${esc(a.account)}</h3>` + (a.error ? `<p class="error">${esc(a.error)}</p>` :
+        (a.bookings || []).map(b => `<p>${esc(b.date)} · ${esc(b.time)} · ${esc(b.facility)} · ${esc(b.status)}</p>`).join("") || "<p>No bookings.</p>")
     ).join("");
-  } catch (e) { box.innerHTML = `<p class="error">${e.message}</p>`; }
+  } catch (e) { box.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
 }
 
 async function probe() {
@@ -77,14 +81,14 @@ async function probe() {
     const data = await api(`/api/probe?date=${encodeURIComponent(date)}&courts=${encodeURIComponent(courts)}`);
     if (!data.courts || !data.courts.length) { box.textContent = "No courts."; return; }
     const times = [...new Set(data.courts.flatMap(c => (c.slots || []).map(s => s.time)))];
-    let html = `<table class="sheet"><tr><th>Time</th>${data.courts.map(c => `<th>${c.name || c.id}</th>`).join("")}</tr>`;
+    let html = `<table class="sheet"><tr><th>Time</th>${data.courts.map(c => `<th>${esc(c.name || c.id)}</th>`).join("")}</tr>`;
     for (const t of times) {
-      html += `<tr><td><strong>${t}</strong></td>`;
+      html += `<tr><td><strong>${esc(t)}</strong></td>`;
       for (const c of data.courts) {
         const slot = (c.slots || []).find(s => s.time === t);
         if (!slot) { html += "<td>—</td>"; continue; }
         if (slot.available) {
-          html += `<td><button class="slot available" data-time="${t}" data-court="${c.name || c.id}">Available — book</button></td>`;
+          html += `<td><button class="slot available" data-time="${esc(t)}" data-court="${esc(c.name || c.id)}">Available — book</button></td>`;
         } else {
           html += `<td><span class="slot taken">Taken</span></td>`;
         }
@@ -97,13 +101,15 @@ async function probe() {
         document.getElementById("bookDate").value = date;
         document.getElementById("bookTime").value = b.dataset.time;
         document.getElementById("bookCourt").value = b.dataset.court;
+        refreshConfirmLabel();
         show("book");
       };
     }
-  } catch (e) { box.innerHTML = `<p class="error">${e.message}</p>`; }
+  } catch (e) { box.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
 }
 
 async function book() {
+  const btn = document.getElementById("bookBtn");
   const box = document.getElementById("bookBox");
   const payload = {
     date: document.getElementById("bookDate").value,
@@ -112,11 +118,13 @@ async function book() {
     dryRun: document.getElementById("bookDry").checked,
     confirm: document.getElementById("bookConfirm").checked,
   };
+  btn.disabled = true;
   box.textContent = "Working…";
   try {
     const res = await api("/api/book", { method: "POST", body: JSON.stringify(payload) });
-    box.innerHTML = `<p><strong>${res.dryRun ? "Would book" : "Booked"}:</strong> ${res.message}</p>`;
-  } catch (e) { box.innerHTML = `<p class="error">${e.message}</p>`; }
+    box.innerHTML = `<p><strong>${res.dryRun ? "Would book" : "Booked"}:</strong> ${esc(res.message)}</p>`;
+  } catch (e) { box.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+  finally { btn.disabled = false; }
 }
 
 document.getElementById("loginBtn").onclick = async () => {
@@ -140,3 +148,13 @@ document.getElementById("logoutBtn").onclick = async () => {
 for (const b of document.querySelectorAll("nav.tabs button[data-view]")) b.onclick = () => show(b.dataset.view);
 document.getElementById("probeBtn").onclick = probe;
 document.getElementById("bookBtn").onclick = book;
+function refreshConfirmLabel() {
+  const court = document.getElementById("bookCourt").value.trim() || "best available";
+  const time = document.getElementById("bookTime").value.trim() || "slot";
+  const date = document.getElementById("bookDate").value || "date";
+  document.getElementById("bookConfirmLabel").textContent = `Book ${court} ${time} on ${date} — I confirm live booking`;
+}
+for (const id of ["bookCourt", "bookTime", "bookDate"]) {
+  document.getElementById(id).addEventListener("input", refreshConfirmLabel);
+}
+refreshConfirmLabel();

@@ -64,6 +64,62 @@ func TestStatusRequiresAuth(t *testing.T) {
 	}
 }
 
+func TestLogoutRequiresPost(t *testing.T) {
+	s := newTestServer()
+	r := httptest.NewRequest(http.MethodGet, "/api/logout", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("logout GET = %d, want 405", w.Code)
+	}
+}
+
+func loginCookies(t *testing.T, s *Server) ([]*http.Cookie, string) {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"test-secret"}`))
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("login = %d, want 200", w.Code)
+	}
+	var lr struct {
+		CSRF string `json:"csrfToken"`
+	}
+	if err := json.NewDecoder(w.Result().Body).Decode(&lr); err != nil || lr.CSRF == "" {
+		t.Fatalf("login missing csrf: %v", err)
+	}
+	return w.Result().Cookies(), lr.CSRF
+}
+
+func TestProbeRejectsBadDate(t *testing.T) {
+	s := newTestServer()
+	cookies, _ := loginCookies(t, s)
+	r := httptest.NewRequest(http.MethodGet, "/api/probe?date=not-a-date", nil)
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("probe bad date = %d, want 400", w.Code)
+	}
+}
+
+func TestBookRejectsBadDate(t *testing.T) {
+	s := newTestServer()
+	cookies, csrf := loginCookies(t, s)
+	r := httptest.NewRequest(http.MethodPost, "/api/book", strings.NewReader(`{"date":"11-09-2026","time":"07:00-08:00","dryRun":true}`))
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	r.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("book bad date = %d, want 400", w.Code)
+	}
+}
+
 func TestLoginWrongPassword(t *testing.T) {
 	s := newTestServer()
 	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"nope"}`))

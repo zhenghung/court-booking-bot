@@ -1123,7 +1123,14 @@ func cmdServe() {
 	})
 	addr := cfg.UIBind + ":" + cfg.UIPort
 	fmt.Printf("Court Bot UI on http://%s\n", addr)
-	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
+	httpSrv := &http.Server{
+		Addr:         addr,
+		Handler:      srv.Handler(),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	if err := httpSrv.ListenAndServe(); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}

@@ -19,13 +19,19 @@ func NewLiveBackend(cfg *config.Config) *LiveBackend {
 	return &LiveBackend{cfg: cfg}
 }
 
-func (b *LiveBackend) primaryAccount() config.Account {
-	return b.cfg.Accounts[0]
+func (b *LiveBackend) primaryAccount() (config.Account, error) {
+	if len(b.cfg.Accounts) == 0 {
+		return config.Account{}, fmt.Errorf("no accounts configured")
+	}
+	return b.cfg.Accounts[0], nil
 }
 
 func (b *LiveBackend) Status() StatusPayload {
-	today := time.Now()
-	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
+	now := time.Now()
+	if kl, err := time.LoadLocation("Asia/Kuala_Lumpur"); err == nil {
+		now = now.In(kl)
+	}
+	targetDate := now.AddDate(0, 0, 7).Format("2006-01-02")
 	var accounts []AccountView
 	var plan []string
 	for _, acc := range b.cfg.Accounts {
@@ -70,7 +76,10 @@ func (b *LiveBackend) loginClient(email, password string) (*api.Client, error) {
 }
 
 func (b *LiveBackend) Facilities() ([]FacilityView, error) {
-	acc := b.primaryAccount()
+	acc, err := b.primaryAccount()
+	if err != nil {
+		return nil, err
+	}
 	c, err := b.loginClient(acc.Email, acc.Password)
 	if err != nil {
 		return nil, err
@@ -121,7 +130,10 @@ func shortTime(t string) string {
 }
 
 func (b *LiveBackend) Probe(date string, courts []string) (ProbeResult, error) {
-	acc := b.primaryAccount()
+	acc, err := b.primaryAccount()
+	if err != nil {
+		return ProbeResult{}, err
+	}
 	c, err := b.loginClient(acc.Email, acc.Password)
 	if err != nil {
 		return ProbeResult{}, err
@@ -151,7 +163,10 @@ func (b *LiveBackend) Probe(date string, courts []string) (ProbeResult, error) {
 }
 
 func (b *LiveBackend) Book(req BookRequest) (BookResponse, error) {
-	acc := b.primaryAccount()
+	acc, err := b.primaryAccount()
+	if err != nil {
+		return BookResponse{}, err
+	}
 	c, err := b.loginClient(acc.Email, acc.Password)
 	if err != nil {
 		return BookResponse{}, err
