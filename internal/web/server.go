@@ -130,7 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/api/login", s.handleLogin)
-	mux.HandleFunc("/api/logout", s.handleLogout)
+	mux.HandleFunc("/api/logout", s.requireAuth(s.requireCSRF(s.handleLogout)))
 	mux.HandleFunc("/api/session", s.requireAuth(s.handleSession))
 	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))
 	mux.HandleFunc("/api/facilities", s.requireAuth(s.handleFacilities))
@@ -408,6 +408,7 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Date = strings.TrimSpace(req.Date)
 	req.Time = strings.TrimSpace(req.Time)
+	req.FacilityID = strings.TrimSpace(req.FacilityID)
 	if req.Date == "" || req.Time == "" {
 		writeErr(w, http.StatusBadRequest, "date and time required")
 		return

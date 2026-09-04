@@ -31,11 +31,11 @@ function show(view) {
 }
 
 function defaultDatePlus7() {
-  const d = new Date();
-  d.setDate(d.getDate() + 7);
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
+  // KL calendar date + 7, independent of browser timezone.
+  const kl = new Date(Date.now() + 8 * 3600000 + 7 * 86400000);
+  const m = String(kl.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(kl.getUTCDate()).padStart(2, "0");
+  return `${kl.getUTCFullYear()}-${m}-${day}`;
 }
 
 async function loadStatus() {
@@ -90,7 +90,7 @@ async function probe() {
   try {
     const data = await api(`/api/probe?date=${encodeURIComponent(date)}&courts=${encodeURIComponent(courts)}`);
     if (!data.courts || !data.courts.length) { box.textContent = "No courts."; return; }
-    const times = [...new Set(data.courts.flatMap(c => (c.slots || []).map(s => s.time)))];
+    const times = [...new Set(data.courts.flatMap(c => (c.slots || []).map(s => s.time)))].sort();
     let html = `<table class="sheet"><tr><th>Time</th>${data.courts.map(c => `<th>${esc(c.name || c.id)}</th>`).join("")}</tr>`;
     for (const t of times) {
       html += `<tr><td><strong>${esc(t)}</strong></td>`;

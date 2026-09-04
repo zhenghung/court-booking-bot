@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 	"unicode"
 
@@ -26,12 +27,15 @@ func (b *LiveBackend) primaryAccount() (config.Account, error) {
 	return b.cfg.Accounts[0], nil
 }
 
-func (b *LiveBackend) Status() StatusPayload {
-	now := time.Now()
+func klNow() time.Time {
 	if kl, err := time.LoadLocation("Asia/Kuala_Lumpur"); err == nil {
-		now = now.In(kl)
+		return time.Now().In(kl)
 	}
-	targetDate := now.AddDate(0, 0, 7).Format("2006-01-02")
+	return time.Now().In(time.FixedZone("MYT", 8*3600))
+}
+
+func (b *LiveBackend) Status() StatusPayload {
+	targetDate := klNow().AddDate(0, 0, 7).Format("2006-01-02")
 	var accounts []AccountView
 	var plan []string
 	for _, acc := range b.cfg.Accounts {
@@ -130,6 +134,39 @@ func shortTime(t string) string {
 	return t
 }
 
+// resolveCourt matches api.Client.ResolveCourtNameToID semantics against an
+// already-fetched facility list, avoiding one HTTP fetch per court.
+func resolveCourt(fac []api.Facility, input string) (string, error) {
+	if isNumeric(input) {
+		return input, nil
+	}
+	lower := strings.ToLower(strings.TrimSpace(input))
+	for _, f := range fac {
+		if strings.ToLower(f.Name) == lower {
+			return f.ID, nil
+		}
+	}
+	for _, f := range fac {
+		name := strings.ToLower(f.Name)
+		if lower != "" && (strings.Contains(name, lower) || strings.Contains(lower, name)) {
+			return f.ID, nil
+		}
+	}
+	return "", fmt.Errorf("court name %q not found", input)
+}
+
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (b *LiveBackend) Probe(date string, courts []string) (ProbeResult, error) {
 	acc, err := b.primaryAccount()
 	if err != nil {
@@ -142,9 +179,13 @@ func (b *LiveBackend) Probe(date string, courts []string) (ProbeResult, error) {
 	if len(courts) == 0 {
 		courts = append(courts, b.cfg.FacilityIDs...)
 	}
+	fac, err := c.GetFacilities()
+	if err != nil {
+		return ProbeResult{}, err
+	}
 	res := ProbeResult{Date: date}
 	for _, court := range courts {
-		rid, err := c.ResolveCourtNameToID(court)
+		rid, err := resolveCourt(fac, court)
 		if err != nil {
 			res.Courts = append(res.Courts, CourtSlots{ID: court, Name: court, Error: err.Error()})
 			continue
@@ -176,14 +217,21 @@ func (b *LiveBackend) Book(req BookRequest) (BookResponse, error) {
 	if req.FacilityID == "" {
 		courts = append([]string{}, b.cfg.FacilityIDs...)
 	}
+	fac, err := c.GetFacilities()
+	if err != nil {
+		return BookResponse{}, err
+	}
 	var target string
+	failures := 0
 	for _, court := range courts {
-		rid, err := c.ResolveCourtNameToID(court)
+		rid, err := resolveCourt(fac, court)
 		if err != nil {
+			failures++
 			continue
 		}
 		slots, err := c.GetTimeslots(rid, req.Date)
 		if err != nil {
+			failures++
 			continue
 		}
 		for _, s := range slots {
@@ -197,6 +245,9 @@ func (b *LiveBackend) Book(req BookRequest) (BookResponse, error) {
 		}
 	}
 	if target == "" {
+		if failures == len(courts) {
+			return BookResponse{}, fmt.Errorf("could not check availability: all %d court lookups failed", len(courts))
+		}
 		log.Printf("UI book: date=%s time=%s dryRun=%v result=no-availability", req.Date, req.Time, req.DryRun)
 		return BookResponse{DryRun: req.DryRun, Message: fmt.Sprintf("%s not available on tried courts for %s", req.Time, req.Date)}, nil
 	}

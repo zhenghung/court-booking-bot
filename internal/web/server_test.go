@@ -66,7 +66,11 @@ func TestStatusRequiresAuth(t *testing.T) {
 
 func TestLogoutRequiresPost(t *testing.T) {
 	s := newTestServer()
+	cookies, _ := loginCookies(t, s)
 	r := httptest.NewRequest(http.MethodGet, "/api/logout", nil)
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusMethodNotAllowed {
