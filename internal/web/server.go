@@ -131,6 +131,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.handleLogout)
+	mux.HandleFunc("/api/session", s.requireAuth(s.handleSession))
 	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))
 	mux.HandleFunc("/api/facilities", s.requireAuth(s.handleFacilities))
 	mux.HandleFunc("/api/bookings", s.requireAuth(s.handleBookings))
@@ -269,6 +270,24 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleSession returns the CSRF token for the current session so a page
+// reload can resume without re-login (auth already checked by middleware).
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	s.mu.Lock()
+	sess, ok := s.sessions[c.Value]
+	s.mu.Unlock()
+	if !ok || time.Now().After(sess.expires) {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"csrfToken": sess.csrf})
 }
 
 func (s *Server) validSession(r *http.Request) bool {

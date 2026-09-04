@@ -120,6 +120,34 @@ func TestBookRejectsBadDate(t *testing.T) {
 	}
 }
 
+func TestSessionResume(t *testing.T) {
+	s := newTestServer()
+	// unauth -> 401
+	r := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("session unauth = %d, want 401", w.Code)
+	}
+	// authed -> csrf matching login
+	cookies, csrf := loginCookies(t, s)
+	r2 := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	for _, c := range cookies {
+		r2.AddCookie(c)
+	}
+	w2 := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w2, r2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("session authed = %d, want 200", w2.Code)
+	}
+	var body struct {
+		CSRF string `json:"csrfToken"`
+	}
+	if err := json.NewDecoder(w2.Result().Body).Decode(&body); err != nil || body.CSRF != csrf {
+		t.Fatalf("session csrf mismatch: %v", err)
+	}
+}
+
 func TestBookRejectsBadTime(t *testing.T) {
 	s := newTestServer()
 	cookies, csrf := loginCookies(t, s)

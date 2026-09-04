@@ -11,6 +11,10 @@ async function api(path, opts = {}) {
     ...opts,
   });
   const body = await res.json().catch(() => ({}));
+  if (res.status === 401 && !document.getElementById("app").hidden) {
+    location.reload(); // session expired — back to login
+    throw new Error("Session expired");
+  }
   if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
   return body;
 }
@@ -134,17 +138,23 @@ async function book() {
   finally { btn.disabled = false; }
 }
 
+function enterApp() {
+  document.getElementById("loginView").hidden = true;
+  document.getElementById("app").hidden = false;
+  document.getElementById("probeDate").value = defaultDatePlus7();
+  document.getElementById("bookDate").value = defaultDatePlus7();
+  refreshConfirmLabel();
+  show("dashboard");
+}
+
 document.getElementById("loginBtn").onclick = async () => {
   const err = document.getElementById("loginErr");
   err.textContent = "";
   try {
     const res = await api("/api/login", { method: "POST", body: JSON.stringify({ password: document.getElementById("pw").value }) });
     csrf = res.csrfToken;
-    document.getElementById("loginView").hidden = true;
-    document.getElementById("app").hidden = false;
-    document.getElementById("probeDate").value = defaultDatePlus7();
-    document.getElementById("bookDate").value = defaultDatePlus7();
-    show("dashboard");
+    document.getElementById("pw").value = "";
+    enterApp();
   } catch (e) { err.textContent = e.message; }
 };
 document.getElementById("logoutBtn").onclick = async () => {
@@ -165,3 +175,12 @@ for (const id of ["bookCourt", "bookTime", "bookDate"]) {
   document.getElementById(id).addEventListener("input", refreshConfirmLabel);
 }
 refreshConfirmLabel();
+
+// Resume existing session (cookie survives reload) — skip login if valid.
+(async () => {
+  try {
+    const s = await api("/api/session");
+    csrf = s.csrfToken;
+    enterApp();
+  } catch (e) { /* stay on login */ }
+})();
