@@ -2,6 +2,8 @@
 
 Simple Go CLI bot for booking court slots on `gpropsystems.com`.
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for system flows and sequence diagrams.
+
 ## Features
 
 - Login with CSRF/session handling
