@@ -53,6 +53,14 @@ Current scheduler is set to Friday midnight MYT:
 0 0 * * 5 cd /home/ubuntu && ./court-bot run --now >> /home/ubuntu/court-bot.log 2>&1
 ```
 
+### Snipe behavior (midnight booking)
+
+`court-bot run --now` waits until 00:00:00 MYT, then:
+
+- **Poll interval**: 200ms — tight loop probing availability at midnight to win contested slots.
+- **Retry**: transient network errors (timeout / connection reset / 5xx) retried up to 3× with backoff before failing; login uses per-request timeout.
+- **Notify delay**: short fire delay before Telegram notification to avoid blocking booking path.
+
 Preferred way to change booking day:
 
 - In Telegram group, send: `/setday monday` (or any weekday)
