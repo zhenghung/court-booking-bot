@@ -43,6 +43,19 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "dial tcp") ||
+		strings.Contains(s, "connection timed out") ||
+		strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "client.timeout") ||
+		strings.Contains(s, "context deadline exceeded") ||
+		strings.Contains(s, "timeout")
+}
+
 // Ping makes a GET request to the base URL and returns the HTTP status.
 func (c *Client) Ping() (string, error) {
 	resp, err := c.HTTPClient.Get(c.BaseURL)
@@ -55,7 +68,29 @@ func (c *Client) Ping() (string, error) {
 }
 
 // Login authenticates with gpropsystems and stores the session cookies.
+// Retries up to 3 times on transient network errors with backoff 1s, 2s.
 func (c *Client) Login(email, password string) error {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if attempt > 1 {
+			backoff := time.Duration(1<<(attempt-2)) * time.Second // 1s, 2s
+			fmt.Printf("  Login retry %d after %s...\n", attempt, backoff)
+			time.Sleep(backoff)
+		}
+		err := c.loginOnce(email, password)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isRetryableError(err) {
+			return err
+		}
+		fmt.Printf("  Login attempt %d failed: %v\n", attempt, err)
+	}
+	return fmt.Errorf("login failed after 3 attempts: %w", lastErr)
+}
+
+func (c *Client) loginOnce(email, password string) error {
 	// Step 1: GET the login page to extract CSRF token
 	csrfToken, err := c.fetchCSRFToken()
 	if err != nil {
