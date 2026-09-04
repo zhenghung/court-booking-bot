@@ -20,3 +20,6 @@ ssh-key-*.key
 
 # Go build cache
 /vendor/
+
+# Worktrees
+.worktrees/
