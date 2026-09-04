@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -26,13 +27,18 @@ func NewClient(baseURL string) *Client {
 	jar, _ := cookiejar.New(nil)
 	transport := &http.Transport{
 		DisableCompression: true, // Disable automatic decompression, we'll handle it manually
+		DialContext: (&net.Dialer{
+			Timeout: 5 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 	}
-
 	return &Client{
 		BaseURL: baseURL,
 		HTTPClient: &http.Client{
 			Transport: transport,
 			Jar:       jar,
+			Timeout:   15 * time.Second,
 		},
 	}
 }
