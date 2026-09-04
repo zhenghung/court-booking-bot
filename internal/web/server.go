@@ -70,6 +70,13 @@ type BookRequest struct {
 	Confirm    bool   `json:"confirm,omitempty"`
 }
 
+// ErrNoCourts signals a book request with no courts configured (HTTP 400).
+var ErrNoCourts = errNoCourts{}
+
+type errNoCourts struct{}
+
+func (errNoCourts) Error() string { return "no courts configured" }
+
 type BookResponse struct {
 	DryRun   bool   `json:"dryRun"`
 	Booked   bool   `json:"booked,omitempty"`
@@ -427,6 +434,10 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.backend.Book(req)
 	if err != nil {
+		if err == ErrNoCourts {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}

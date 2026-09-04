@@ -59,7 +59,11 @@ function startCountdown(targetDate) {
   const midnight = Date.UTC(y, mo - 1, d) - 8 * 3600000;
   function tick() {
     const ms = midnight - new Date();
-    if (ms <= 0) { el.textContent = "window open"; return; }
+    if (ms <= 0) {
+      el.textContent = "window open";
+      clearInterval(startCountdown.t);
+      return;
+    }
     const h = Math.floor(ms / 3600000), m = Math.floor(ms % 3600000 / 60000), s2 = Math.floor(ms % 60000 / 1000);
     el.textContent = `opens in ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s2).padStart(2, "0")}`;
   }

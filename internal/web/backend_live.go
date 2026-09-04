@@ -165,7 +165,9 @@ func shortTime(t string) string {
 
 // resolveCourt matches api.Client.ResolveCourtNameToID semantics against an
 // already-fetched facility list, avoiding one HTTP fetch per court.
-func resolveCourt(fac []api.Facility, input string) (string, error) {
+// exactOnly skips the partial-match fallback (used for live booking where a
+// typo must never silently pick the wrong court).
+func resolveCourt(fac []api.Facility, input string, exactOnly bool) (string, error) {
 	if isNumeric(input) {
 		return input, nil
 	}
@@ -174,6 +176,9 @@ func resolveCourt(fac []api.Facility, input string) (string, error) {
 		if strings.ToLower(f.Name) == lower {
 			return f.ID, nil
 		}
+	}
+	if exactOnly {
+		return "", fmt.Errorf("court name %q not found (exact match required)", input)
 	}
 	for _, f := range fac {
 		name := strings.ToLower(f.Name)
@@ -214,7 +219,7 @@ func (b *LiveBackend) Probe(date string, courts []string) (ProbeResult, error) {
 	}
 	res := ProbeResult{Date: date}
 	for _, court := range courts {
-		rid, err := resolveCourt(fac, court)
+		rid, err := resolveCourt(fac, court, false)
 		if err != nil {
 			res.Courts = append(res.Courts, CourtSlots{ID: court, Name: court, Error: err.Error()})
 			continue
@@ -238,13 +243,16 @@ func (b *LiveBackend) Book(req BookRequest) (BookResponse, error) {
 	if err != nil {
 		return BookResponse{}, err
 	}
-	c, err := b.loginClient(acc.Email, acc.Password)
-	if err != nil {
-		return BookResponse{}, err
-	}
 	courts := []string{req.FacilityID}
 	if req.FacilityID == "" {
 		courts = append([]string{}, b.cfg.FacilityIDs...)
+	}
+	if len(courts) == 0 {
+		return BookResponse{}, ErrNoCourts
+	}
+	c, err := b.loginClient(acc.Email, acc.Password)
+	if err != nil {
+		return BookResponse{}, err
 	}
 	fac, err := c.GetFacilities()
 	if err != nil {
@@ -253,7 +261,7 @@ func (b *LiveBackend) Book(req BookRequest) (BookResponse, error) {
 	var target string
 	failures := 0
 	for _, court := range courts {
-		rid, err := resolveCourt(fac, court)
+		rid, err := resolveCourt(fac, court, true)
 		if err != nil {
 			failures++
 			continue

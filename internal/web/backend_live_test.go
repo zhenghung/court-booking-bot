@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhenghung/court-booking-bot/internal/api"
 	"github.com/zhenghung/court-booking-bot/internal/config"
 )
 
@@ -24,6 +25,21 @@ func TestLiveBackendEmptyAccountsNoPanic(t *testing.T) {
 	}
 }
 
+func TestResolveCourtExactOnly(t *testing.T) {
+	fac := []api.Facility{{ID: "7935", Name: "Pickleball Court P1"}}
+	if id, err := resolveCourt(fac, "P1", false); err != nil || id != "7935" {
+		t.Fatalf("partial probe resolve = %q, %v", id, err)
+	}
+	if _, err := resolveCourt(fac, "P1", true); err == nil {
+		t.Fatal("exact-only book resolve should reject partial match")
+	}
+	if id, err := resolveCourt(fac, "pickleball court p1", true); err != nil || id != "7935" {
+		t.Fatalf("exact book resolve = %q, %v", id, err)
+	}
+	if _, err := NewLiveBackend(&config.Config{Accounts: []config.Account{{Name: "T"}}}).Book(BookRequest{Date: "2026-09-12", Time: "07:00-08:00", DryRun: true}); err != ErrNoCourts {
+		t.Fatalf("empty courts book err = %v, want ErrNoCourts", err)
+	}
+}
 func TestNextRunFriday(t *testing.T) {
 	// Friday 2026-09-04 12:00 KL -> next run is same-day midnight? No:
 	// midnight today passed, so next Friday midnight (7 days out).
