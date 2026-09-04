@@ -547,7 +547,7 @@ func (c *Client) GetUnitUserProfile(unitID string) (*UserProfile, error) {
 // Returns an error if the name cannot be resolved.
 func (c *Client) ResolveCourtNameToID(courtInput string) (string, error) {
 	// If it's already a numeric ID, return it as-is
-	if isNumeric(courtInput) {
+	if IsNumeric(courtInput) {
 		return courtInput, nil
 	}
 
@@ -585,8 +585,8 @@ func (c *Client) ResolveCourtNameToID(courtInput string) (string, error) {
 	return "", fmt.Errorf("court name %q not found. Available courts: %v", courtInput, names)
 }
 
-// isNumeric checks if a string contains only digits.
-func isNumeric(s string) bool {
+// IsNumeric checks if a string contains only digits. Exported for reuse (e.g. cmd/bot poll loop).
+func IsNumeric(s string) bool {
 	for _, c := range s {
 		if c < '0' || c > '9' {
 			return false
