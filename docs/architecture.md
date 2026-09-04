@@ -196,3 +196,16 @@ sequenceDiagram
         CLI-->>CLI: exit 1
     end
 ```
+
+## Code map
+
+- `cmd/bot/main.go`: CLI commands, Telegram bot daemon
+- `internal/api/client.go`: HTTP client (login, booking)
+- `internal/config/config.go`: .env loading and parsing
+
+## API endpoints
+
+- `POST /login/login_data_submit`: auth (CSRF `_co6sO0rpsfat` first)
+- `POST /booking/get_booking_timeslot`: timeslots per facility + date
+- `POST /booking/add_new_booking_action`: create booking (multipart otherData)
+- `GET /booking/booking_listing`: bookings from today onwards
