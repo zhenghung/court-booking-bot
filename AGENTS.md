@@ -1,209 +1,29 @@
 # Agent Instructions
 
-This file helps LLM agents understand and work with this codebase.
+Bot: Go CLI for gpropsystems court booking. Cron + Telegram on Oracle ARM VM.
 
-## Project Overview
-
-Go CLI bot for automating court bookings on gpropsystems.com. Runs on Oracle Cloud Free Tier ARM64 VM with cron scheduling and Telegram notifications.
-
-## Quick Reference
-
-### Build Commands
+## Build / test
 
 ```bash
-# Build locally (macOS)
 go build -o court-bot ./cmd/bot
-
-# Cross-compile for server (Linux ARM64)
+./court-bot ping
+./court-bot probe --date 2026-03-06
 GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot
 ```
 
-### CLI Commands
+## Docs (single source)
 
-| Command | Description |
-|---------|-------------|
-| `./court-bot ping` | Test HTTP connectivity to gpropsystems |
-| `./court-bot probe --date 2026-03-06` | Check court availability for a date |
-| `./court-bot book --time 07:00-08:00` | Book a specific timeslot |
-| `./court-bot run --now --dry-run` | Test scheduler without booking |
-| `./court-bot bot` | Run Telegram bot daemon |
-| `./court-bot facilities` | List all available courts with IDs and names |
-| `./court-bot health-check` | Test login functionality and alert on failure |
+- docs/setup.md: install + .env
+- docs/usage.md: CLI + Telegram
+- docs/configuration.md: courts, plan, multi-account
+- docs/deployment.md: server + cron
+- docs/operations.md: ops + troubleshooting
+- docs/architecture.md: flows + code map
 
-### Telegram Commands
+Rules: docs/ is human truth, .env.example is config truth. Cross-link, never copy.
 
-| Command | Description |
-|---------|-------------|
-| `/status` | Check bot config, next run time, booking plan |
-| `/setday <day>` | Update booking day and cron day (e.g., `/setday monday`) |
-| `/bookings` | Show upcoming bookings from today onwards |
+## Gotchas
 
-## Deployment
-
-### Server Details
-
-- **Host**: `ubuntu@149.118.140.17`
-- **Platform**: Oracle Cloud Free Tier ARM64 (Ubuntu 22.04)
-- **Timezone**: Asia/Kuala_Lumpur (UTC+8)
-- **SSH key**: `ssh-key-*.key` in project root (gitignored)
-
-### File Locations on Server
-
-| Path | Description |
-|------|-------------|
-| `/home/ubuntu/court-bot` | Binary |
-| `/home/ubuntu/.env` | Configuration |
-| `/home/ubuntu/court-bot.log` | Cron output log |
-| `/home/ubuntu/health-check.log` | Health check log |
-
-### Deploy Updated Binary
-
-```bash
-# 1. Stop the service
-ssh -i ssh-key-*.key ubuntu@149.118.140.17 "sudo systemctl stop court-bot"
-
-# 2. Copy new binary
-scp -i ssh-key-*.key court-bot-linux-arm64 ubuntu@149.118.140.17:/home/ubuntu/court-bot
-
-# 3. Restart service
-ssh -i ssh-key-*.key ubuntu@149.118.140.17 "sudo systemctl start court-bot"
-```
-
-### Service Management
-
-```bash
-# Check status
-sudo systemctl status court-bot
-
-# View logs
-journalctl -u court-bot -f
-
-# Restart
-sudo systemctl restart court-bot
-```
-
-### Cron Schedule
-
-- Configured via `crontab -e` on server
-- **Booking schedule**: `0 0 * * 5` = Friday 00:00 MYT
-  - Runs: `./court-bot run --now`
-- **Health check schedule**: `0 8 * * *` = Daily 08:00 MYT
-  - Runs: `./court-bot health-check`
-  - Sends Telegram alert on login failure only
-
-## Code Structure
-
-```
-court-booking-bot/
-├── cmd/bot/main.go          # CLI commands, Telegram bot daemon
-├── internal/
-│   ├── api/client.go        # HTTP client for gpropsystems (login, booking)
-│   └── config/config.go     # .env loading and parsing
-├── .env.example             # Example configuration
-├── RUNBOOK.md               # Operational procedures
-└── AGENTS.md                # This file
-```
-
-### Key Functions in `cmd/bot/main.go`
-
-| Function | Purpose |
-|----------|---------|
-| `cmdPing()` | Test connectivity |
-| `cmdProbe()` | Fetch and display timeslots |
-| `cmdBook()` | Book a single slot |
-| `cmdRun()` | Scheduler with midnight wait and booking |
-| `cmdBot()` | Telegram polling daemon |
-| `sendTelegramMessage()` | Send notification to Telegram |
-
-### Key Functions in `internal/api/client.go`
-
-| Function | Purpose |
-|----------|---------|
-| `Login()` | Authenticate and store session |
-| `GetTimeslots()` | Fetch available slots for a date |
-| `BookSlot()` | Submit booking request |
-| `fetchCSRFToken()` | Extract CSRF token from login page |
-| `GetFacilities()` | Fetch list of all courts with IDs and names |
-| `ResolveCourtNameToID()` | Convert court name to ID (supports partial matching) |
-| `GetUserProfile()` | Fetch user profile (name, contact) from API after login |
-| `GetUnitUserProfile()` | Fetch unit-specific user profile from API |
-
-## API Endpoints
-
-### Profile Data Fetching
-
-The browser uses these endpoints to fetch profile data after login:
-
-- `POST /booking/get_user_info` - Returns user profile (name, contact)
-- `POST /booking/get_unit_user` - Returns unit-specific profile (requires unitId parameter)
-
-**Note**: The bot currently hardcodes `GPROP_BOOKING_NAME` and `GPROP_CONTACT` in the `.env` file instead of fetching from the API due to gzip decompression issues with the API responses.
-
-## Configuration
-
-### Single Account (current)
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GPROP_EMAIL` | Login email | Yes |
-| `GPROP_PASSWORD` | Login password | Yes |
-| `GPROP_FACILITY_IDS` | Comma-separated court IDs or names | Yes |
-| `GPROP_UNIT_ID` | Unit/apartment ID | Yes |
-| `GPROP_BOOKING_NAME` | Name for booking | Yes |
-| `GPROP_CONTACT` | Contact number | Yes |
-| `GPROP_TARGET_DAY` | Day of week to book (e.g., "friday") | Yes |
-| `GPROP_BOOKING_PLAN` | Slots and court priority | Yes |
-| `GPROP_TELEGRAM_BOT_TOKEN` | Telegram bot token | No (for notifications) |
-| `GPROP_TELEGRAM_CHAT_ID` | Telegram chat/group ID | No (for notifications) |
-
-**Court Name Support**: `GPROP_FACILITY_IDS` and `GPROP_BOOKING_PLAN` can use either numeric IDs (e.g., `7935`) or court names (e.g., `Pickleball Court P1`). Court names support case-insensitive partial matching (e.g., `P1` matches `Pickleball Court P1`).
-
-### Multi-Account (optional)
-
-Use `GPROP_ACCOUNT_N_*` variables for multiple accounts (N = 1, 2, 3...):
-
-| Variable | Description |
-|----------|-------------|
-| `GPROP_ACCOUNT_N_NAME` | Display name for account |
-| `GPROP_ACCOUNT_N_EMAIL` | Login email |
-| `GPROP_ACCOUNT_N_PASSWORD` | Login password |
-| `GPROP_ACCOUNT_N_UNIT_ID` | Unit ID (falls back to global) |
-| `GPROP_ACCOUNT_N_BOOKING_NAME` | Booking name (falls back to global) |
-| `GPROP_ACCOUNT_N_CONTACT` | Contact (falls back to global) |
-| `GPROP_ACCOUNT_N_BOOKING_PLAN` | Account-specific booking plan |
-
-Each account can book up to 2 hours/week, so 2 accounts = 4 hours total.
-
-## Testing Changes
-
-1. Build: `go build -o court-bot ./cmd/bot`
-2. Test locally: `./court-bot ping` or `./court-bot probe`
-3. Cross-compile: `GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot`
-4. Deploy (see above)
-5. Verify via Telegram `/status` command
-
-## Common Tasks
-
-### Change booking day
-
-Preferred (Telegram):
-1. In Telegram group, run: `/setday monday`
-2. Bot updates both `GPROP_TARGET_DAY` in `~/.env` and user crontab
-
-Manual fallback:
-1. Update server `.env`: `GPROP_TARGET_DAY=monday`
-2. Update crontab: `0 0 * * 1` (1=Monday)
-
-### Update booking plan
-
-Edit `GPROP_BOOKING_PLAN` in server `.env`:
-```
-GPROP_BOOKING_PLAN=07:00-08:00>7935,7937,7936;08:00-09:00>7937,7936,7935
-```
-
-### Rotate Telegram bot token
-
-1. Message @BotFather → `/revoke` → select bot
-2. Copy new token
-3. Update both local `.env` and server `~/.env`
-4. Restart service: `sudo systemctl restart court-bot`
+- Cron uses Asia/Kuala_Lumpur; no CRON_TZ.
+- Never commit `.env` or `ssh-key-*.key`.
+- Target date = today + 7d. Never book before midnight in `run`.
