@@ -16,6 +16,7 @@ import (
 
 	"github.com/zhenghung/court-booking-bot/internal/api"
 	"github.com/zhenghung/court-booking-bot/internal/config"
+	"github.com/zhenghung/court-booking-bot/internal/web"
 )
 
 func main() {
@@ -42,6 +43,8 @@ func main() {
 		cmdFacilities()
 	case "health-check":
 		cmdHealthCheck()
+	case "serve":
+		cmdServe()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -60,6 +63,7 @@ func printUsage() {
 	fmt.Println("  bot          Run Telegram bot daemon (listens for /status and /setday)")
 	fmt.Println("  facilities   List all available courts with their IDs and names")
 	fmt.Println("  health-check Test login functionality and alert on failure")
+	fmt.Println("  serve        Run embedded web UI (JSON API + SPA)")
 	fmt.Println()
 	fmt.Println("Run 'court-bot <command> --help' for command flags.")
 }
@@ -1097,4 +1101,41 @@ func cmdHealthCheck() {
 	fmt.Println("  Login successful!")
 	fmt.Println("[2/2] Health check passed")
 	fmt.Println("✓ Login is working correctly")
+}
+
+func cmdServe() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
+	if cfg.UIPassword == "" {
+		fmt.Fprintln(os.Stderr, "ERROR: UI_PASSWORD must be set to run the web UI")
+		os.Exit(1)
+	}
+	if len(cfg.UIPassword) < 16 {
+		fmt.Fprintln(os.Stderr, "ERROR: UI_PASSWORD must be at least 16 characters")
+		os.Exit(1)
+	}
+	if len(cfg.Accounts) == 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: no accounts configured")
+		os.Exit(1)
+	}
+	srv := web.NewServer(web.ServerOptions{
+		Password: cfg.UIPassword,
+		Backend:  web.NewLiveBackend(cfg),
+	})
+	addr := cfg.UIBind + ":" + cfg.UIPort
+	fmt.Printf("Court Bot UI on http://%s\n", addr)
+	httpSrv := &http.Server{
+		Addr:         addr,
+		Handler:      srv.Handler(),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	if err := httpSrv.ListenAndServe(); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
 }

@@ -69,6 +69,11 @@ type Config struct {
 
 	TelegramBotToken string
 	TelegramChatID   string
+
+	// Web UI (serve command)
+	UIPassword string
+	UIPort     string
+	UIBind     string
 }
 
 // parseBookingPlan parses a booking plan string like "07:00-08:00>7937,7936;08:00-09:00>7937"
@@ -115,6 +120,9 @@ func Load() (*Config, error) {
 		Contact:          os.Getenv("GPROP_CONTACT"),
 		TelegramBotToken: strings.TrimSpace(os.Getenv("GPROP_TELEGRAM_BOT_TOKEN")),
 		TelegramChatID:   strings.TrimSpace(os.Getenv("GPROP_TELEGRAM_CHAT_ID")),
+		UIPassword:       os.Getenv("UI_PASSWORD"),
+		UIPort:           strings.TrimSpace(os.Getenv("UI_PORT")),
+		UIBind:           strings.TrimSpace(os.Getenv("UI_BIND")),
 	}
 
 	// Parse comma-separated facility IDs
@@ -130,6 +138,13 @@ func Load() (*Config, error) {
 
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://www.gpropsystems.com"
+	}
+
+	if cfg.UIPort == "" {
+		cfg.UIPort = "8080"
+	}
+	if cfg.UIBind == "" {
+		cfg.UIBind = "0.0.0.0"
 	}
 
 	// Parse target day

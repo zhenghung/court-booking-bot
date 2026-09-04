@@ -36,3 +36,18 @@ Cron weekday follows `GPROP_TARGET_DAY` (change via `/setday`, see [operations](
 
 Server paths: binary `/home/ubuntu/court-bot`, env `/home/ubuntu/.env`,
 logs `/home/ubuntu/court-bot.log`.
+
+## Web UI
+
+Set `UI_PASSWORD` in server `.env` (long random value, 16+ chars), open Oracle ingress for
+the UI port (`UI_PORT`, default 8080), then run as a daemon:
+
+```bash
+./court-bot serve >> /home/ubuntu/court-bot.log 2>&1 &
+```
+
+(Serve reads `UI_*` from the server `.env` — never pass the password on the
+command line; it leaks via shell history and `ps`.)
+
+See [usage](usage.md) for the console tour and [configuration](configuration.md)
+for `UI_*` vars.
