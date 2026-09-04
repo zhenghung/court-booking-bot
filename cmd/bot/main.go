@@ -364,36 +364,123 @@ func cmdRun() {
 	fmt.Println()
 
 	// Step 2: Wait for midnight (unless --now)
+	pollAttempts := 0
+	var fireTime time.Time
+	var midnight time.Time
 	if !*now {
-		midnight := time.Date(today.Year(), today.Month(), today.Day()+1, 0, 0, 0, 0, today.Location())
+		midnight = time.Date(today.Year(), today.Month(), today.Day()+1, 0, 0, 0, 0, today.Location())
 		waitDuration := time.Until(midnight)
-		fmt.Printf("[2/3] Waiting for midnight (%s)...\n", midnight.Format("2006-01-02 15:04:05"))
-		fmt.Printf("  Time until midnight: %s\n", waitDuration.Round(time.Second))
 
-		// If more than 60s away, re-login closer to midnight to keep session fresh
+		// Re-login at 23:59:30 if more than 60s away
 		if waitDuration > 60*time.Second {
 			preLoginWait := waitDuration - 30*time.Second
 			fmt.Printf("  Sleeping %s, then re-authenticating...\n", preLoginWait.Round(time.Second))
 			time.Sleep(preLoginWait)
-
 			fmt.Println("  Re-authenticating all accounts...")
 			for i, acc := range cfg.Accounts {
+				// Login now retries internally (Task 2), just log attempt
+				fmt.Printf("  %s: re-login... ", acc.Name)
 				if err := clients[i].Login(acc.Email, acc.Password); err != nil {
 					notify(fmt.Sprintf("Court bot error: re-login failed for %s - %v", acc.Name, err))
 					fmt.Fprintf(os.Stderr, "ERROR re-login %s: %v\n", acc.Name, err)
 					os.Exit(1)
 				}
+				fmt.Println("OK")
 			}
-			fmt.Println("  Re-login successful!")
 		}
 
-		// Final wait until exact midnight
-		remaining := time.Until(midnight)
-		if remaining > 0 {
-			fmt.Printf("  Final wait: %s\n", remaining.Round(time.Millisecond))
+		// Poll loop from 23:59:55 until slot available or 00:00:30
+		pollStart := time.Date(today.Year(), today.Month(), today.Day()+1, 0, 0, -5, 0, today.Location()) // 23:59:55
+		if time.Now().Before(pollStart) {
+			remaining := time.Until(pollStart)
+			fmt.Printf("  Waiting for poll window %s (%s)...\n", pollStart.Format("15:04:05"), remaining.Round(time.Second))
 			time.Sleep(remaining)
 		}
-		fmt.Printf("  MIDNIGHT! %s\n", time.Now().Format("15:04:05.000"))
+
+		fmt.Println("  Polling for slot availability every 200ms...")
+		consecutiveErrors := 0
+		ticker := time.NewTicker(200 * time.Millisecond)
+
+		// Poll primary facility first (fast check) — resolve once before loop
+		primaryCourt := "" // first court of first booking entry
+		if len(cfg.Accounts) > 0 && len(cfg.Accounts[0].BookingPlan) > 0 &&
+			len(cfg.Accounts[0].BookingPlan[0].Courts) > 0 {
+			primaryCourt = cfg.Accounts[0].BookingPlan[0].Courts[0]
+		}
+		if primaryCourt == "" {
+			fmt.Fprintln(os.Stderr, "ERROR: no courts configured for poll, proceeding to midnight wait")
+		}
+		resolvedID := primaryCourt
+		if !api.IsNumeric(resolvedID) && resolvedID != "" {
+			if rid, err := clients[0].ResolveCourtNameToID(resolvedID); err == nil {
+				resolvedID = rid
+			} else {
+				fmt.Fprintf(os.Stderr, "WARN: failed to resolve poll court %q: %v — polls will likely fail, continuing to midnight\n", resolvedID, err)
+			}
+		}
+
+		pollTimeout := midnight.Add(30 * time.Second)
+		for range ticker.C {
+			pollAttempts++
+			if time.Now().After(pollTimeout) {
+				fmt.Println("  Poll timeout 00:00:30, proceeding to book anyway")
+				break
+			}
+
+			slots, err := clients[0].GetTimeslots(resolvedID, targetDate)
+			if err != nil {
+				consecutiveErrors++
+				fmt.Printf("  Poll %d: timeslot error (%v) consecutive=%d\n", pollAttempts, err, consecutiveErrors)
+				if consecutiveErrors >= 3 {
+					fmt.Println("  3 consecutive poll errors, continuing anyway")
+					consecutiveErrors = 0 // don't abort, keep polling
+				}
+				continue
+			}
+			consecutiveErrors = 0
+
+			// Check if target slot available (look for 07:00-09:00 or first plan slot)
+			targetSlot := ""
+			if len(cfg.Accounts) > 0 && len(cfg.Accounts[0].BookingPlan) > 0 {
+				targetSlot = cfg.Accounts[0].BookingPlan[0].Slot
+			}
+			available := false
+			for _, s := range slots {
+				if s.Time == targetSlot && s.Available {
+					available = true
+					break
+				}
+			}
+			fmt.Printf("  Poll %d %s: %s available=%v\n", pollAttempts, time.Now().Format("15:04:05.000"), targetSlot, available)
+			if available {
+				fireTime = time.Now()
+				fmt.Printf("  Slot flipped available at %s after %d polls!\n", fireTime.Format("15:04:05.000"), pollAttempts)
+				break
+			}
+		}
+		ticker.Stop()
+
+		// Final wait until exact midnight if we broke early before midnight.
+		// Never book before midnight — clamp early flip to midnight.
+		if fireTime.IsZero() {
+			remaining := time.Until(midnight)
+			if remaining > 0 {
+				fmt.Printf("  Final wait: %s\n", remaining.Round(time.Millisecond))
+				time.Sleep(remaining)
+			}
+			fireTime = time.Now()
+			fmt.Printf("  MIDNIGHT! %s (polls=%d)\n", fireTime.Format("15:04:05.000"), pollAttempts)
+		} else if fireTime.Before(midnight) {
+			remaining := time.Until(midnight)
+			fmt.Printf("  Early flip at %s, waiting %s until midnight...\n", fireTime.Format("15:04:05.000"), remaining.Round(time.Millisecond))
+			if remaining > 0 {
+				time.Sleep(remaining)
+			}
+			fireTime = time.Now()
+			fmt.Printf("  MIDNIGHT! %s (polls=%d)\n", fireTime.Format("15:04:05.000"), pollAttempts)
+		} else {
+			fmt.Printf("  Fire at %s (polls=%d, %s after midnight)\n", fireTime.Format("15:04:05.000"), pollAttempts, time.Since(midnight).Round(time.Millisecond))
+		}
 	} else {
 		fmt.Println("[2/3] Skipping midnight wait (--now flag)")
 	}
@@ -486,18 +573,33 @@ func cmdRun() {
 	}
 
 	fmt.Println()
+	fireStr := fireTime.Format("15:04:05.000")
+	fireDelayStr := "0s"
+	if fireTime.IsZero() {
+		fireStr = time.Now().Format("15:04:05.000")
+		if !midnight.IsZero() {
+			fireDelayStr = time.Since(midnight).Round(time.Millisecond).String()
+		}
+	} else {
+		if !midnight.IsZero() {
+			fireDelayStr = fireTime.Sub(midnight).Round(time.Millisecond).String()
+		} else {
+			fireDelayStr = "0s"
+		}
+	}
 	if *dryRun {
 		fmt.Println("=== DRY RUN complete ===")
-		notify(fmt.Sprintf("Court bot dry run complete for %s (%d accounts, %d total slots)", targetDate, len(cfg.Accounts), totalSlots))
+		notify(fmt.Sprintf("Court bot dry run complete for %s (%d accounts, %d total slots) (polls=%d fire=%s delay=%s)", targetDate, len(cfg.Accounts), totalSlots, pollAttempts, fireStr, fireDelayStr))
 	} else {
 		fmt.Printf("=== Done: %d/%d total slots booked ===\n", totalSuccess, totalSlots)
-		notify(fmt.Sprintf("Court bot done for %s: %d/%d slots booked", targetDate, totalSuccess, totalSlots))
+		notify(fmt.Sprintf("Court bot done for %s: %d/%d slots booked (polls=%d fire=%s delay=%s)", targetDate, totalSuccess, totalSlots, pollAttempts, fireStr, fireDelayStr))
 	}
 }
 
 func sendTelegramMessage(botToken, chatID, message string) error {
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
-	resp, err := http.PostForm(endpoint, url.Values{
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.PostForm(endpoint, url.Values{
 		"chat_id": {chatID},
 		"text":    {message},
 	})
@@ -586,7 +688,8 @@ func cmdBot() {
 
 func getTelegramUpdates(botToken string, offset int64) ([]TelegramUpdate, error) {
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30", botToken, offset)
-	resp, err := http.Get(endpoint)
+	httpClient := &http.Client{Timeout: 45 * time.Second}
+	resp, err := httpClient.Get(endpoint)
 	if err != nil {
 		return nil, err
 	}

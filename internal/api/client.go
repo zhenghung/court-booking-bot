@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -26,15 +27,35 @@ func NewClient(baseURL string) *Client {
 	jar, _ := cookiejar.New(nil)
 	transport := &http.Transport{
 		DisableCompression: true, // Disable automatic decompression, we'll handle it manually
+		DialContext: (&net.Dialer{
+			Timeout: 5 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 	}
-
 	return &Client{
 		BaseURL: baseURL,
 		HTTPClient: &http.Client{
 			Transport: transport,
 			Jar:       jar,
+			Timeout:   15 * time.Second,
 		},
 	}
+}
+
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "dial tcp") ||
+		strings.Contains(s, "connection timed out") ||
+		strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "client.timeout") ||
+		strings.Contains(s, "context deadline exceeded") ||
+		strings.Contains(s, "timeout") ||
+		strings.Contains(s, "returned status 5") ||
+		strings.Contains(s, "status 5")
 }
 
 // Ping makes a GET request to the base URL and returns the HTTP status.
@@ -49,14 +70,40 @@ func (c *Client) Ping() (string, error) {
 }
 
 // Login authenticates with gpropsystems and stores the session cookies.
+// Retries up to 3 times on transient network errors with backoff 1s, 2s.
 func (c *Client) Login(email, password string) error {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if attempt > 1 {
+			backoff := time.Duration(1<<(attempt-2)) * time.Second // 1s, 2s
+			fmt.Printf("  Login retry %d after %s...\n", attempt, backoff)
+			time.Sleep(backoff)
+		}
+		err := c.loginOnce(email, password)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isRetryableError(err) {
+			return err
+		}
+		fmt.Printf("  Login attempt %d failed: %v\n", attempt, err)
+	}
+	return fmt.Errorf("login failed after 3 attempts: %w", lastErr)
+}
+
+func (c *Client) loginOnce(email, password string) error {
 	// Step 1: GET the login page to extract CSRF token
 	csrfToken, err := c.fetchCSRFToken()
 	if err != nil {
 		return fmt.Errorf("failed to fetch CSRF token: %w", err)
 	}
 	c.csrfToken = csrfToken
-	fmt.Printf("  CSRF token: %s...%s\n", csrfToken[:8], csrfToken[len(csrfToken)-4:])
+	preview := csrfToken
+	if len(csrfToken) > 12 {
+		preview = csrfToken[:8] + "..." + csrfToken[len(csrfToken)-4:]
+	}
+	fmt.Printf("  CSRF token: %s\n", preview)
 
 	// Step 2: POST login credentials
 	form := url.Values{}
@@ -506,7 +553,7 @@ func (c *Client) GetUnitUserProfile(unitID string) (*UserProfile, error) {
 // Returns an error if the name cannot be resolved.
 func (c *Client) ResolveCourtNameToID(courtInput string) (string, error) {
 	// If it's already a numeric ID, return it as-is
-	if isNumeric(courtInput) {
+	if IsNumeric(courtInput) {
 		return courtInput, nil
 	}
 
@@ -544,8 +591,8 @@ func (c *Client) ResolveCourtNameToID(courtInput string) (string, error) {
 	return "", fmt.Errorf("court name %q not found. Available courts: %v", courtInput, names)
 }
 
-// isNumeric checks if a string contains only digits.
-func isNumeric(s string) bool {
+// IsNumeric checks if a string contains only digits. Exported for reuse (e.g. cmd/bot poll loop).
+func IsNumeric(s string) bool {
 	for _, c := range s {
 		if c < '0' || c > '9' {
 			return false
