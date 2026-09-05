@@ -23,6 +23,12 @@ GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot
 
 Rules: docs/ is human truth, .env.example is config truth. Cross-link, never copy.
 
+## Git workflow
+
+- Never commit directly to `main`.
+- Always use feature branch + GitHub PR + squash merge.
+- Never `git push` to `main`; never `git merge` into `main` locally.
+
 ## Gotchas
 
 - Cron uses Asia/Kuala_Lumpur; no CRON_TZ.
