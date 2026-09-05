@@ -25,9 +25,8 @@ Rules: docs/ is human truth, .env.example is config truth. Cross-link, never cop
 
 ## Git workflow
 
-- Never commit directly to `main`.
-- Always use feature branch + GitHub PR + squash merge.
-- Never `git push` to `main`; never `git merge` into `main` locally.
+- Never work directly on `main`: no commit, push, or local merge.
+- Always use feature branch + GitHub PR; human squash-merges.
 
 ## Gotchas
 
