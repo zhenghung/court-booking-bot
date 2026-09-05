@@ -106,6 +106,44 @@ func TestLoadSchedulesFileUnknownAccount(t *testing.T) {
 	}
 }
 
+func TestLoadSchedulesFileAllMixed(t *testing.T) {
+	path := writeSchedulesFile(t, `schedules:
+  - name: fri-pickle
+    target_day: friday
+    booking_plan: "07:00-09:00>P3"
+    accounts: ["all", "Account 1"]
+`)
+	if _, err := LoadSchedulesFile(path, testAccounts()); err == nil {
+		t.Fatal("expected all-mixed error, got nil")
+	}
+}
+
+func TestLoadSchedulesFileBadSlotFormat(t *testing.T) {
+	path := writeSchedulesFile(t, `schedules:
+  - name: fri-pickle
+    target_day: friday
+    booking_plan: "7-9>P3"
+    accounts: [all]
+`)
+	if _, err := LoadSchedulesFile(path, testAccounts()); err == nil {
+		t.Fatal("expected bad slot format error, got nil")
+	}
+}
+func TestLoadExplicitSchedulesFileMissing(t *testing.T) {
+	t.Setenv("GPROP_EMAIL", "a@example.com")
+	t.Setenv("GPROP_PASSWORD", "pw")
+	t.Setenv("GPROP_FACILITY_IDS", "P1")
+	t.Setenv("GPROP_UNIT_ID", "1-X")
+	t.Setenv("GPROP_BOOKING_NAME", "N")
+	t.Setenv("GPROP_CONTACT", "123")
+	t.Setenv("GPROP_TARGET_DAY", "friday")
+	t.Setenv("GPROP_BOOKING_PLAN", "07:00-09:00>P1")
+	t.Setenv("GPROP_SCHEDULES_FILE", filepath.Join(t.TempDir(), "nope.yaml"))
+	if _, err := Load(); err == nil {
+		t.Fatal("expected explicit missing file error, got nil")
+	}
+}
+
 func TestLoadSchedulesFileMissing(t *testing.T) {
 	schedules, err := LoadSchedulesFile(filepath.Join(t.TempDir(), "nope.yaml"), testAccounts())
 	if err != nil {
@@ -135,6 +173,11 @@ func TestSelectSchedules(t *testing.T) {
 	got, err = SelectSchedules(all, nil)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("expected all schedules, got %+v err=%v", got, err)
+	}
+	// Duplicate names dedupe.
+	got, err = SelectSchedules(all, []string{"fri-pickle", "fri-pickle"})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("expected deduped selection, got %+v err=%v", got, err)
 	}
 }
 

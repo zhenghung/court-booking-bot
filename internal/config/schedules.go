@@ -19,6 +19,7 @@ type Schedule struct {
 }
 
 var scheduleSlugRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+var scheduleSlotRe = regexp.MustCompile(`^\d{2}:\d{2}-\d{2}:\d{2}$`)
 
 var validDays = map[string]bool{
 	"sunday": true, "sun": true,
@@ -82,6 +83,11 @@ func LoadSchedulesFile(path string, accounts []Account) ([]Schedule, error) {
 		if len(plan) == 0 {
 			return nil, fmt.Errorf("schedule %q: booking_plan must have at least one entry", name)
 		}
+		for _, e := range plan {
+			if !scheduleSlotRe.MatchString(e.Slot) {
+				return nil, fmt.Errorf("schedule %q: invalid slot %q (expected HH:MM-HH:MM)", name, e.Slot)
+			}
+		}
 
 		if len(s.Accounts) == 0 {
 			return nil, fmt.Errorf("schedule %q: accounts must be set ([all] or account names)", name)
@@ -103,6 +109,9 @@ func LoadSchedulesFile(path string, accounts []Account) ([]Schedule, error) {
 				hasAll = true
 				break
 			}
+		}
+		if hasAll && len(names) > 1 {
+			return nil, fmt.Errorf("schedule %q: accounts cannot mix \"all\" with names", name)
 		}
 		if !hasAll {
 			known := map[string]bool{}
@@ -127,6 +136,7 @@ func LoadSchedulesFile(path string, accounts []Account) ([]Schedule, error) {
 }
 
 // SelectSchedules filters schedules by name. Empty names returns all.
+// Duplicate names are deduped so a schedule never books twice.
 func SelectSchedules(all []Schedule, names []string) ([]Schedule, error) {
 	if len(names) == 0 {
 		return all, nil
@@ -136,7 +146,12 @@ func SelectSchedules(all []Schedule, names []string) ([]Schedule, error) {
 		byName[s.Name] = s
 	}
 	var out []Schedule
+	seen := map[string]bool{}
 	for _, n := range names {
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
 		s, ok := byName[n]
 		if !ok {
 			return nil, fmt.Errorf("unknown schedule %q", n)

@@ -170,6 +170,9 @@ func cmdProbe() {
 			facilityIDs = config.ScheduleCourts(sel[0])
 		}
 		fmt.Printf("Schedule: %s (%s, account %s)\n", sel[0].Name, sel[0].TargetDay, accs[0].Name)
+		if len(accs) > 1 {
+			fmt.Printf("Note: schedule covers %d accounts; probe checks availability with %s only\n", len(accs), accs[0].Name)
+		}
 	}
 
 	targetDate := *date
@@ -278,6 +281,9 @@ func cmdBook() {
 			facilityIDs = config.ScheduleCourts(sel[0])
 		}
 		fmt.Printf("Schedule: %s (%s, account %s)\n", sel[0].Name, sel[0].TargetDay, accs[0].Name)
+		if len(accs) > 1 {
+			fmt.Printf("Note: schedule covers %d accounts; book checks out with %s only\n", len(accs), accs[0].Name)
+		}
 	}
 
 	targetDate := *date
@@ -443,6 +449,12 @@ func cmdRun() {
 				fmt.Printf("  - %s\n", sk)
 			}
 			fmt.Println("Run with --now to override and book anyway.")
+			if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+				msg := fmt.Sprintf("Court bot skipped: %d schedule(s) skipped for %s (%s)", len(skipped), targetDate, targetDateParsed.Weekday())
+				if err := sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, msg); err != nil {
+					fmt.Fprintf(os.Stderr, "WARN: failed to send Telegram notification: %v\n", err)
+				}
+			}
 			return
 		}
 	} else {
@@ -489,7 +501,7 @@ func cmdRun() {
 		totalSlots += len(u.plan)
 	}
 	if totalSlots == 0 {
-		fmt.Fprintf(os.Stderr, "ERROR: No booking plans configured. Set GPROP_BOOKING_PLAN or GPROP_ACCOUNT_N_BOOKING_PLAN\n")
+		fmt.Fprintf(os.Stderr, "ERROR: No booking plans configured. Set GPROP_BOOKING_PLAN, GPROP_ACCOUNT_N_BOOKING_PLAN, or schedules.yaml booking_plan\n")
 		os.Exit(1)
 	}
 

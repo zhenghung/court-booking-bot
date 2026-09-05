@@ -35,9 +35,14 @@ Each account can book up to 2 hours/week, so 2 accounts = 4 hours total.
 ## Sniping schedules (optional)
 
 Copy `schedules.example.yaml` to `schedules.yaml` (or set
-`GPROP_SCHEDULES_FILE` to its path). Each schedule is independent: own
-`target_day`, `booking_plan` (same `slot>courts;...` syntax), and `accounts`
-(`[all]` or `GPROP_ACCOUNT_N_NAME` values). Schedule names are slugs
+`GPROP_SCHEDULES_FILE` to its path). Lookup order: `GPROP_SCHEDULES_FILE` →
+`./schedules.yaml` → `~/.schedules.yaml`; missing file = legacy path. On the
+server always set `GPROP_SCHEDULES_FILE` to an absolute path — a relative
+`./schedules.yaml` depends on the cron working directory and may silently
+fall back to legacy. Each schedule is independent: own
+`target_day`, `booking_plan` (same `slot>courts;...` syntax, slots validated
+as `HH:MM-HH:MM`), and `accounts`
+(`[all]` or `GPROP_ACCOUNT_N_NAME` values, never mixed). Schedule names are slugs
 `[a-z0-9-]` for `--schedule` and cron. The schedule's plan wins; the
 account's own plan is ignored in schedule mode. No file = legacy
 `GPROP_TARGET_DAY` + booking-plan path, unchanged.
