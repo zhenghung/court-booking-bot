@@ -67,6 +67,11 @@ type Config struct {
 	// Multi-account support
 	Accounts []Account
 
+	// Multi-schedule support (schedules.yaml, optional).
+	// Empty when no file exists — legacy TargetDay + account-plan path stays.
+	Schedules    []Schedule
+	ScheduleFile string
+
 	TelegramBotToken string
 	TelegramChatID   string
 
@@ -247,6 +252,26 @@ func Load() (*Config, error) {
 			Contact:     cfg.Contact,
 			BookingPlan: plan,
 		})
+	}
+
+	// Load optional schedules file. Missing file = legacy path (noop).
+	explicit := strings.TrimSpace(os.Getenv("GPROP_SCHEDULES_FILE"))
+	if explicit != "" {
+		schedules, err := LoadSchedulesFile(explicit, cfg.Accounts)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Schedules = schedules
+		if len(schedules) > 0 {
+			cfg.ScheduleFile = explicit
+		}
+	} else if path := resolveScheduleFilePath(""); path != "" {
+		schedules, err := LoadSchedulesFile(path, cfg.Accounts)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Schedules = schedules
+		cfg.ScheduleFile = path
 	}
 
 	return cfg, nil

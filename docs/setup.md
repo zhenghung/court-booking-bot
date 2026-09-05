@@ -23,7 +23,8 @@ Copy `.env.example` to `.env` and fill values. Field reference (single source):
 | `GPROP_TELEGRAM_BOT_TOKEN` | Telegram bot token | No (for notifications) |
 | `GPROP_TELEGRAM_CHAT_ID` | Telegram chat/group ID | No (for notifications) |
 
-See [configuration](configuration.md) for court names, booking plan format, and multi-account.
+See [configuration](configuration.md) for court names, booking plan format, multi-account,
+and optional sniping schedules (`schedules.yaml`).
 
 ## Build
 

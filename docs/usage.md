@@ -21,6 +21,9 @@ Purpose: every CLI and Telegram command in one place. Audience: humans.
 ./court-bot book --time 07:00-08:00 --date 2026-03-04
 ./court-bot run --now --dry-run
 ./court-bot run
+./court-bot run --list-schedules
+./court-bot run --now --dry-run --schedule fri-pickle
+./court-bot probe --schedule fri-pickle --date 2026-03-04
 ```
 
 `run` computes target booking date as **today + 7 days**.
