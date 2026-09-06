@@ -129,6 +129,20 @@ func TestLoadSchedulesFileBadSlotFormat(t *testing.T) {
 		t.Fatal("expected bad slot format error, got nil")
 	}
 }
+func TestLoadSchedulesFileBadSlotRange(t *testing.T) {
+	for _, plan := range []string{"99:99-99:99>P3", "07:00-07:00>P3", "09:00-08:00>P3", "24:00-25:00>P3"} {
+		path := writeSchedulesFile(t, `schedules:
+  - name: fri-pickle
+    target_day: friday
+    booking_plan: "`+plan+`"
+    accounts: [all]
+`)
+		if _, err := LoadSchedulesFile(path, testAccounts()); err == nil {
+			t.Fatalf("expected bad slot range error for %q, got nil", plan)
+		}
+	}
+}
+
 func TestLoadExplicitSchedulesFileMissing(t *testing.T) {
 	t.Setenv("GPROP_EMAIL", "a@example.com")
 	t.Setenv("GPROP_PASSWORD", "pw")
@@ -141,6 +155,21 @@ func TestLoadExplicitSchedulesFileMissing(t *testing.T) {
 	t.Setenv("GPROP_SCHEDULES_FILE", filepath.Join(t.TempDir(), "nope.yaml"))
 	if _, err := Load(); err == nil {
 		t.Fatal("expected explicit missing file error, got nil")
+	}
+}
+
+func TestLoadExplicitSchedulesFileEmpty(t *testing.T) {
+	t.Setenv("GPROP_EMAIL", "a@example.com")
+	t.Setenv("GPROP_PASSWORD", "pw")
+	t.Setenv("GPROP_FACILITY_IDS", "P1")
+	t.Setenv("GPROP_UNIT_ID", "1-X")
+	t.Setenv("GPROP_BOOKING_NAME", "N")
+	t.Setenv("GPROP_CONTACT", "123")
+	t.Setenv("GPROP_TARGET_DAY", "friday")
+	t.Setenv("GPROP_BOOKING_PLAN", "07:00-09:00>P1")
+	t.Setenv("GPROP_SCHEDULES_FILE", writeSchedulesFile(t, "schedules: []\n"))
+	if _, err := Load(); err == nil {
+		t.Fatal("expected explicit empty file error, got nil")
 	}
 }
 

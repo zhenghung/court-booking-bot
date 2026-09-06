@@ -268,6 +268,9 @@ func Load() (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
+		if len(schedules) == 0 {
+			return nil, fmt.Errorf("schedules file %q defines no schedules", explicit)
+		}
 		cfg.Schedules = schedules
 		cfg.ScheduleFile = explicit
 	} else if path := resolveScheduleFilePath(""); path != "" {
