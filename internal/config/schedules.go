@@ -84,14 +84,6 @@ func LoadSchedulesFile(path string, accounts []Account) ([]Schedule, error) {
 		if len(plan) == 0 {
 			return nil, fmt.Errorf("schedule %q: booking_plan must have at least one entry", name)
 		}
-		for _, e := range plan {
-			if !scheduleSlotRe.MatchString(e.Slot) {
-				return nil, fmt.Errorf("schedule %q: invalid slot %q (expected HH:MM-HH:MM)", name, e.Slot)
-			}
-			if err := validateSlotRange(e.Slot); err != nil {
-				return nil, fmt.Errorf("schedule %q: invalid slot %q: %w", name, e.Slot, err)
-			}
-		}
 
 		if len(s.Accounts) == 0 {
 			return nil, fmt.Errorf("schedule %q: accounts must be set ([all] or account names)", name)

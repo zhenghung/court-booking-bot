@@ -143,6 +143,36 @@ func TestLoadSchedulesFileBadSlotRange(t *testing.T) {
 	}
 }
 
+func TestLoadLegacyBadSlotRejected(t *testing.T) {
+	t.Setenv("GPROP_EMAIL", "a@example.com")
+	t.Setenv("GPROP_PASSWORD", "pw")
+	t.Setenv("GPROP_FACILITY_IDS", "P1")
+	t.Setenv("GPROP_UNIT_ID", "1-X")
+	t.Setenv("GPROP_BOOKING_NAME", "N")
+	t.Setenv("GPROP_CONTACT", "123")
+	t.Setenv("GPROP_TARGET_DAY", "friday")
+	t.Setenv("GPROP_BOOKING_PLAN", "99:99-99:99>P1")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected legacy bad slot error, got nil")
+	}
+}
+
+func TestLoadSchedulesFileBoundarySlots(t *testing.T) {
+	path := writeSchedulesFile(t, `schedules:
+  - name: edge
+    target_day: friday
+    booking_plan: "00:00-00:01>P1;23:00-23:59>P1"
+    accounts: [all]
+`)
+	schedules, err := LoadSchedulesFile(path, testAccounts())
+	if err != nil {
+		t.Fatalf("expected boundary slots valid, got %v", err)
+	}
+	if len(schedules) != 1 || len(schedules[0].BookingPlan) != 2 {
+		t.Fatalf("unexpected schedules: %+v", schedules)
+	}
+}
+
 func TestLoadExplicitSchedulesFileMissing(t *testing.T) {
 	t.Setenv("GPROP_EMAIL", "a@example.com")
 	t.Setenv("GPROP_PASSWORD", "pw")
