@@ -81,7 +81,9 @@ type Config struct {
 	UIBind     string
 }
 
-// parseBookingPlan parses a booking plan string like "07:00-08:00>7937,7936;08:00-09:00>7937"
+// parseBookingPlan parses a booking plan string like "07:00-08:00>7937,7936;08:00-09:00>7937".
+// Slots are validated as real HH:MM-HH:MM ranges (fail fast — a bad slot can
+// never match at snipe time). Shared by env plans and schedules.yaml.
 func parseBookingPlan(raw string) ([]BookingEntry, error) {
 	var plan []BookingEntry
 	if raw == "" {
@@ -105,6 +107,12 @@ func parseBookingPlan(raw string) ([]BookingEntry, error) {
 			}
 		}
 		if slot != "" && len(courts) > 0 {
+			if !scheduleSlotRe.MatchString(slot) {
+				return nil, fmt.Errorf("invalid slot %q (expected HH:MM-HH:MM)", slot)
+			}
+			if err := validateSlotRange(slot); err != nil {
+				return nil, fmt.Errorf("invalid slot %q: %w", slot, err)
+			}
 			plan = append(plan, BookingEntry{Slot: slot, Courts: courts})
 		}
 	}
