@@ -68,6 +68,52 @@ func printUsage() {
 	fmt.Println("Run 'court-bot <command> --help' for command flags.")
 }
 
+// scheduleFlag collects repeatable --schedule values.
+type scheduleFlag []string
+
+func (s *scheduleFlag) String() string { return strings.Join(*s, ",") }
+func (s *scheduleFlag) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
+// scheduleFileLabel reports where schedules came from for error messages.
+func scheduleFileLabel(cfg *config.Config) string {
+	if cfg.ScheduleFile != "" {
+		return cfg.ScheduleFile
+	}
+	return "no file (set GPROP_SCHEDULES_FILE or ./schedules.yaml)"
+}
+
+// primaryCredentials returns login creds + default courts.
+// Prefers legacy single-account env; falls back to Accounts[0] so
+// probe/book/facilities work under multi-account config.
+func primaryCredentials(cfg *config.Config) (email, password string, courts []string) {
+	if cfg.Email != "" && cfg.Password != "" {
+		return cfg.Email, cfg.Password, cfg.FacilityIDs
+	}
+	if len(cfg.Accounts) > 0 {
+		var union []string
+		seen := map[string]bool{}
+		for _, acc := range cfg.Accounts {
+			for _, e := range acc.BookingPlan {
+				for _, c := range e.Courts {
+					if !seen[c] {
+						seen[c] = true
+						union = append(union, c)
+					}
+				}
+			}
+		}
+		courts = cfg.FacilityIDs
+		if len(courts) == 0 {
+			courts = union
+		}
+		return cfg.Accounts[0].Email, cfg.Accounts[0].Password, courts
+	}
+	return "", "", cfg.FacilityIDs
+}
+
 func cmdPing() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -90,6 +136,7 @@ func cmdProbe() {
 	probeFlags := flag.NewFlagSet("probe", flag.ExitOnError)
 	date := probeFlags.String("date", "", "Target date in YYYY-MM-DD format (default: 7 days from now)")
 	facilityID := probeFlags.String("facility", "", "Facility ID (overrides .env)")
+	scheduleName := probeFlags.String("schedule", "", "Schedule name from schedules.yaml (uses its courts + account)")
 	probeFlags.Parse(os.Args[2:])
 
 	cfg, err := config.Load()
@@ -98,9 +145,34 @@ func cmdProbe() {
 		os.Exit(1)
 	}
 
-	facilityIDs := cfg.FacilityIDs
+	email, password, defaultCourts := primaryCredentials(cfg)
+	facilityIDs := defaultCourts
 	if *facilityID != "" {
 		facilityIDs = []string{*facilityID}
+	}
+	if *scheduleName != "" {
+		if len(cfg.Schedules) == 0 {
+			fmt.Fprintf(os.Stderr, "ERROR: --schedule %q given but no schedules file loaded (%s)\n", *scheduleName, scheduleFileLabel(cfg))
+			os.Exit(1)
+		}
+		sel, err := config.SelectSchedules(cfg.Schedules, []string{*scheduleName})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		accs, err := config.ResolveScheduleAccounts(sel[0], cfg.Accounts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		email, password = accs[0].Email, accs[0].Password
+		if *facilityID == "" {
+			facilityIDs = config.ScheduleCourts(sel[0])
+		}
+		fmt.Printf("Schedule: %s (%s, account %s)\n", sel[0].Name, sel[0].TargetDay, accs[0].Name)
+		if len(accs) > 1 {
+			fmt.Printf("Note: schedule covers %d accounts; probe checks availability with %s only\n", len(accs), accs[0].Name)
+		}
 	}
 
 	targetDate := *date
@@ -115,7 +187,7 @@ func cmdProbe() {
 	// Step 1: Login
 	fmt.Println("[1/4] Logging in...")
 	client := api.NewClient(cfg.BaseURL)
-	if err := client.Login(cfg.Email, cfg.Password); err != nil {
+	if err := client.Login(email, password); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
@@ -164,6 +236,7 @@ func cmdBook() {
 	date := bookFlags.String("date", "", "Target date in YYYY-MM-DD format (default: 7 days from now)")
 	timeSlot := bookFlags.String("time", "", "Time slot to book, e.g. 07:00-08:00 (required)")
 	facilityID := bookFlags.String("facility", "", "Facility ID (overrides .env, tries single court)")
+	scheduleName := bookFlags.String("schedule", "", "Schedule name from schedules.yaml (uses its courts + account)")
 	dryRun := bookFlags.Bool("dry-run", false, "Check availability without actually booking")
 	bookFlags.Parse(os.Args[2:])
 
@@ -178,9 +251,39 @@ func cmdBook() {
 		os.Exit(1)
 	}
 
-	facilityIDs := cfg.FacilityIDs
+	email, password, defaultCourts := primaryCredentials(cfg)
+	facilityIDs := defaultCourts
 	if *facilityID != "" {
 		facilityIDs = []string{*facilityID}
+	}
+	bookUnitID, bookName, bookContact := cfg.UnitID, cfg.BookingName, cfg.Contact
+	if len(cfg.Accounts) > 0 && (cfg.Email == "" || *scheduleName != "") {
+		bookUnitID, bookName, bookContact = cfg.Accounts[0].UnitID, cfg.Accounts[0].BookingName, cfg.Accounts[0].Contact
+	}
+	if *scheduleName != "" {
+		if len(cfg.Schedules) == 0 {
+			fmt.Fprintf(os.Stderr, "ERROR: --schedule %q given but no schedules file loaded (%s)\n", *scheduleName, scheduleFileLabel(cfg))
+			os.Exit(1)
+		}
+		sel, err := config.SelectSchedules(cfg.Schedules, []string{*scheduleName})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		accs, err := config.ResolveScheduleAccounts(sel[0], cfg.Accounts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		email, password = accs[0].Email, accs[0].Password
+		bookUnitID, bookName, bookContact = accs[0].UnitID, accs[0].BookingName, accs[0].Contact
+		if *facilityID == "" {
+			facilityIDs = config.ScheduleCourts(sel[0])
+		}
+		fmt.Printf("Schedule: %s (%s, account %s)\n", sel[0].Name, sel[0].TargetDay, accs[0].Name)
+		if len(accs) > 1 {
+			fmt.Printf("Note: schedule covers %d accounts; book checks out with %s only\n", len(accs), accs[0].Name)
+		}
 	}
 
 	targetDate := *date
@@ -199,7 +302,7 @@ func cmdBook() {
 	// Step 1: Login
 	fmt.Println("[1/5] Logging in...")
 	client := api.NewClient(cfg.BaseURL)
-	if err := client.Login(cfg.Email, cfg.Password); err != nil {
+	if err := client.Login(email, password); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
@@ -261,7 +364,7 @@ func cmdBook() {
 	// Step 4: Book the slot
 	fmt.Println("[4/5] Booking slot...")
 	fmt.Printf("  Booking court %s, %s on %s...\n", availableCourt, *timeSlot, targetDate)
-	result, err := client.BookSlot(availableCourt, cfg.UnitID, cfg.BookingName, cfg.Contact, targetDate, *timeSlot)
+	result, err := client.BookSlot(availableCourt, bookUnitID, bookName, bookContact, targetDate, *timeSlot)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
@@ -279,6 +382,9 @@ func cmdRun() {
 	runFlags := flag.NewFlagSet("run", flag.ExitOnError)
 	now := runFlags.Bool("now", false, "Skip midnight wait — book immediately (for testing)")
 	dryRun := runFlags.Bool("dry-run", false, "Check availability without actually booking")
+	listSchedules := runFlags.Bool("list-schedules", false, "List schedules from schedules.yaml and exit")
+	var scheduleNames scheduleFlag
+	runFlags.Var(&scheduleNames, "schedule", "Run only this schedule (repeatable, default: all)")
 	runFlags.Parse(os.Args[2:])
 
 	cfg, err := config.Load()
@@ -286,25 +392,116 @@ func cmdRun() {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Validate scheduler config
-	if cfg.TargetDay == "" {
-		fmt.Fprintf(os.Stderr, "ERROR: GPROP_TARGET_DAY must be set (e.g. friday)\n")
-		os.Exit(1)
-	}
-	targetDayOfWeek, err := parseDayOfWeek(cfg.TargetDay)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-		os.Exit(1)
+	if cfg.ScheduleFile != "" {
+		fmt.Printf("Schedules:  %s\n", cfg.ScheduleFile)
 	}
 
-	// Check that at least one account has a booking plan
+	if *listSchedules {
+		printSchedules(cfg)
+		return
+	}
+
+	// runUnit is one schedule × one account with the schedule's plan.
+	// Schedule plan wins; the account's own BookingPlan is ignored in schedule mode.
+	type runUnit struct {
+		schedule string
+		day      time.Weekday
+		account  config.Account
+		plan     []config.BookingEntry
+	}
+	var units []runUnit
+	var skipped []string
+	useSchedules := len(cfg.Schedules) > 0
+
+	// Calculate target date: today + 7 days (the date that opens at next midnight)
+	today := time.Now()
+	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
+	targetDateParsed, _ := time.Parse("2006-01-02", targetDate)
+
+	if useSchedules {
+		selected, err := config.SelectSchedules(cfg.Schedules, []string(scheduleNames))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		for _, s := range selected {
+			day, err := parseDayOfWeek(s.TargetDay)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR schedule %q: %v\n", s.Name, err)
+				os.Exit(1)
+			}
+			if targetDateParsed.Weekday() != day && !*now {
+				skipped = append(skipped, fmt.Sprintf("%s (target %s is %s, schedule wants %s)", s.Name, targetDate, targetDateParsed.Weekday(), day))
+				continue
+			}
+			accs, err := config.ResolveScheduleAccounts(s, cfg.Accounts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+				os.Exit(1)
+			}
+			for _, acc := range accs {
+				units = append(units, runUnit{schedule: s.Name, day: day, account: acc, plan: s.BookingPlan})
+			}
+		}
+		if len(units) == 0 {
+			fmt.Printf("Nothing to book tonight — all selected schedules skipped:\n")
+			for _, sk := range skipped {
+				fmt.Printf("  - %s\n", sk)
+			}
+			fmt.Println("Run with --now to override and book anyway.")
+			if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+				msg := fmt.Sprintf("Court bot skipped: %d schedule(s) skipped for %s (%s)", len(skipped), targetDate, targetDateParsed.Weekday())
+				if err := sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, msg); err != nil {
+					fmt.Fprintf(os.Stderr, "WARN: failed to send Telegram notification: %v\n", err)
+				}
+			}
+			return
+		}
+	} else {
+		if len(scheduleNames) > 0 {
+			fmt.Fprintf(os.Stderr, "ERROR: --schedule given but no schedules file loaded (%s)\n", scheduleFileLabel(cfg))
+			os.Exit(1)
+		}
+		// Validate scheduler config
+		if cfg.TargetDay == "" {
+			fmt.Fprintf(os.Stderr, "ERROR: GPROP_TARGET_DAY must be set (e.g. friday)\n")
+			os.Exit(1)
+		}
+		targetDayOfWeek, err := parseDayOfWeek(cfg.TargetDay)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Check if the target date falls on the desired day of week
+		if targetDateParsed.Weekday() != targetDayOfWeek {
+			fmt.Printf("Nothing to book tonight — %s is a %s, not %s.\n",
+				targetDate, targetDateParsed.Weekday(), targetDayOfWeek)
+			fmt.Println("Run with --now to override and book anyway.")
+			if !*now {
+				notifyMsg := fmt.Sprintf("Court bot skipped: target date %s is %s (expected %s)", targetDate, targetDateParsed.Weekday(), targetDayOfWeek)
+				if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+					if err := sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, notifyMsg); err != nil {
+						fmt.Fprintf(os.Stderr, "WARN: failed to send Telegram notification: %v\n", err)
+					}
+				}
+				return
+			}
+			fmt.Println("--now flag set, proceeding anyway...")
+			fmt.Println()
+		}
+		for _, acc := range cfg.Accounts {
+			units = append(units, runUnit{schedule: "", day: targetDayOfWeek, account: acc, plan: acc.BookingPlan})
+		}
+	}
+
+	// Check that at least one unit has a booking plan
 	totalSlots := 0
-	for _, acc := range cfg.Accounts {
-		totalSlots += len(acc.BookingPlan)
+	for _, u := range units {
+		totalSlots += len(u.plan)
 	}
 	if totalSlots == 0 {
-		fmt.Fprintf(os.Stderr, "ERROR: No booking plans configured. Set GPROP_BOOKING_PLAN or GPROP_ACCOUNT_N_BOOKING_PLAN\n")
+		fmt.Fprintf(os.Stderr, "ERROR: No booking plans configured. Set GPROP_BOOKING_PLAN, GPROP_ACCOUNT_N_BOOKING_PLAN, or schedules.yaml booking_plan\n")
 		os.Exit(1)
 	}
 
@@ -318,18 +515,29 @@ func cmdRun() {
 		}
 	}
 
-	// Calculate target date: today + 7 days (the date that opens at next midnight)
-	today := time.Now()
-	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
-	targetDateParsed, _ := time.Parse("2006-01-02", targetDate)
-
-	fmt.Printf("Target day:   %s\n", cfg.TargetDay)
-	fmt.Printf("Target date:  %s (%s)\n", targetDate, targetDateParsed.Weekday())
-	fmt.Printf("Accounts:     %d\n", len(cfg.Accounts))
-	for i, acc := range cfg.Accounts {
-		fmt.Printf("\n  [Account %d: %s]\n", i+1, acc.Name)
-		for _, entry := range acc.BookingPlan {
-			fmt.Printf("    %s → courts %v\n", entry.Slot, entry.Courts)
+	if useSchedules {
+		fmt.Printf("Target date:  %s (%s)\n", targetDate, targetDateParsed.Weekday())
+		if len(skipped) > 0 {
+			fmt.Printf("Skipped:      %d schedule(s)\n", len(skipped))
+			for _, sk := range skipped {
+				fmt.Printf("  - %s\n", sk)
+			}
+		}
+		for _, u := range units {
+			fmt.Printf("\n  [%s / %s]\n", u.schedule, u.account.Name)
+			for _, entry := range u.plan {
+				fmt.Printf("    %s → courts %v\n", entry.Slot, entry.Courts)
+			}
+		}
+	} else {
+		fmt.Printf("Target day:   %s\n", cfg.TargetDay)
+		fmt.Printf("Target date:  %s (%s)\n", targetDate, targetDateParsed.Weekday())
+		fmt.Printf("Accounts:     %d\n", len(cfg.Accounts))
+		for i, acc := range cfg.Accounts {
+			fmt.Printf("\n  [Account %d: %s]\n", i+1, acc.Name)
+			for _, entry := range acc.BookingPlan {
+				fmt.Printf("    %s → courts %v\n", entry.Slot, entry.Courts)
+			}
 		}
 	}
 	if *dryRun {
@@ -337,23 +545,20 @@ func cmdRun() {
 	}
 	fmt.Println()
 
-	// Check if the target date falls on the desired day of week
-	if targetDateParsed.Weekday() != targetDayOfWeek {
-		fmt.Printf("Nothing to book tonight — %s is a %s, not %s.\n",
-			targetDate, targetDateParsed.Weekday(), targetDayOfWeek)
-		fmt.Println("Run with --now to override and book anyway.")
-		if !*now {
-			notify(fmt.Sprintf("Court bot skipped: target date %s is %s (expected %s)", targetDate, targetDateParsed.Weekday(), targetDayOfWeek))
-			return
+	// Unique accounts across units (a schedule may share accounts).
+	var uniqAccounts []config.Account
+	seenAcc := map[string]bool{}
+	for _, u := range units {
+		if !seenAcc[u.account.Email] {
+			seenAcc[u.account.Email] = true
+			uniqAccounts = append(uniqAccounts, u.account)
 		}
-		fmt.Println("--now flag set, proceeding anyway...")
-		fmt.Println()
 	}
 
 	// Step 1: Login and resolve courts
 	fmt.Println("[1/3] Logging in and resolving court names...")
-	clients := make([]*api.Client, len(cfg.Accounts))
-	for i, acc := range cfg.Accounts {
+	clients := map[string]*api.Client{}
+	for _, acc := range uniqAccounts {
 		fmt.Printf("  %s: logging in... ", acc.Name)
 		client := api.NewClient(cfg.BaseURL)
 		if err := client.Login(acc.Email, acc.Password); err != nil {
@@ -363,7 +568,7 @@ func cmdRun() {
 		}
 		fmt.Println("OK")
 
-		clients[i] = client
+		clients[acc.Email] = client
 	}
 	fmt.Println()
 
@@ -381,10 +586,10 @@ func cmdRun() {
 			fmt.Printf("  Sleeping %s, then re-authenticating...\n", preLoginWait.Round(time.Second))
 			time.Sleep(preLoginWait)
 			fmt.Println("  Re-authenticating all accounts...")
-			for i, acc := range cfg.Accounts {
+			for _, acc := range uniqAccounts {
 				// Login now retries internally (Task 2), just log attempt
 				fmt.Printf("  %s: re-login... ", acc.Name)
-				if err := clients[i].Login(acc.Email, acc.Password); err != nil {
+				if err := clients[acc.Email].Login(acc.Email, acc.Password); err != nil {
 					notify(fmt.Sprintf("Court bot error: re-login failed for %s - %v", acc.Name, err))
 					fmt.Fprintf(os.Stderr, "ERROR re-login %s: %v\n", acc.Name, err)
 					os.Exit(1)
@@ -406,17 +611,21 @@ func cmdRun() {
 		ticker := time.NewTicker(200 * time.Millisecond)
 
 		// Poll primary facility first (fast check) — resolve once before loop
-		primaryCourt := "" // first court of first booking entry
-		if len(cfg.Accounts) > 0 && len(cfg.Accounts[0].BookingPlan) > 0 &&
-			len(cfg.Accounts[0].BookingPlan[0].Courts) > 0 {
-			primaryCourt = cfg.Accounts[0].BookingPlan[0].Courts[0]
+		primaryCourt := "" // first court of first unit's first plan entry
+		var pollClient *api.Client
+		targetSlot := ""
+		if len(units) > 0 && len(units[0].plan) > 0 &&
+			len(units[0].plan[0].Courts) > 0 {
+			primaryCourt = units[0].plan[0].Courts[0]
+			targetSlot = units[0].plan[0].Slot
+			pollClient = clients[units[0].account.Email]
 		}
 		if primaryCourt == "" {
 			fmt.Fprintln(os.Stderr, "ERROR: no courts configured for poll, proceeding to midnight wait")
 		}
 		resolvedID := primaryCourt
-		if !api.IsNumeric(resolvedID) && resolvedID != "" {
-			if rid, err := clients[0].ResolveCourtNameToID(resolvedID); err == nil {
+		if !api.IsNumeric(resolvedID) && resolvedID != "" && pollClient != nil {
+			if rid, err := pollClient.ResolveCourtNameToID(resolvedID); err == nil {
 				resolvedID = rid
 			} else {
 				fmt.Fprintf(os.Stderr, "WARN: failed to resolve poll court %q: %v — polls will likely fail, continuing to midnight\n", resolvedID, err)
@@ -431,7 +640,11 @@ func cmdRun() {
 				break
 			}
 
-			slots, err := clients[0].GetTimeslots(resolvedID, targetDate)
+			if pollClient == nil {
+				fmt.Println("  No poll client, proceeding to book anyway")
+				break
+			}
+			slots, err := pollClient.GetTimeslots(resolvedID, targetDate)
 			if err != nil {
 				consecutiveErrors++
 				fmt.Printf("  Poll %d: timeslot error (%v) consecutive=%d\n", pollAttempts, err, consecutiveErrors)
@@ -443,11 +656,7 @@ func cmdRun() {
 			}
 			consecutiveErrors = 0
 
-			// Check if target slot available (look for 07:00-09:00 or first plan slot)
-			targetSlot := ""
-			if len(cfg.Accounts) > 0 && len(cfg.Accounts[0].BookingPlan) > 0 {
-				targetSlot = cfg.Accounts[0].BookingPlan[0].Slot
-			}
+			// Check if target slot available (first plan slot of first unit)
 			available := false
 			for _, s := range slots {
 				if s.Time == targetSlot && s.Available {
@@ -490,19 +699,24 @@ func cmdRun() {
 	}
 	fmt.Println()
 
-	// Step 3: Book slots for each account
+	// Step 3: Book slots for each unit (schedule × account)
 	fmt.Println("[3/3] Booking target slots...")
 	totalSuccess := 0
-	for i, acc := range cfg.Accounts {
-		if len(acc.BookingPlan) == 0 {
+	for _, u := range units {
+		acc := u.account
+		if len(u.plan) == 0 {
 			continue
 		}
 
-		fmt.Printf("\n=== %s ===\n", acc.Name)
-		client := clients[i]
+		if useSchedules {
+			fmt.Printf("\n=== %s / %s ===\n", u.schedule, acc.Name)
+		} else {
+			fmt.Printf("\n=== %s ===\n", acc.Name)
+		}
+		client := clients[acc.Email]
 		successCount := 0
 
-		for _, entry := range acc.BookingPlan {
+		for _, entry := range u.plan {
 			// Resolve court names to IDs for this entry
 			var resolvedCourts []string
 			for _, court := range entry.Courts {
@@ -572,7 +786,7 @@ func cmdRun() {
 			}
 		}
 
-		fmt.Printf("\n  %s: %d/%d slots booked\n", acc.Name, successCount, len(acc.BookingPlan))
+		fmt.Printf("\n  %s: %d/%d slots booked\n", acc.Name, successCount, len(u.plan))
 		totalSuccess += successCount
 	}
 
@@ -593,10 +807,43 @@ func cmdRun() {
 	}
 	if *dryRun {
 		fmt.Println("=== DRY RUN complete ===")
-		notify(fmt.Sprintf("Court bot dry run complete for %s (%d accounts, %d total slots) (polls=%d fire=%s delay=%s)", targetDate, len(cfg.Accounts), totalSlots, pollAttempts, fireStr, fireDelayStr))
+		notify(fmt.Sprintf("Court bot dry run complete for %s (%d accounts, %d total slots) (polls=%d fire=%s delay=%s)", targetDate, len(uniqAccounts), totalSlots, pollAttempts, fireStr, fireDelayStr))
 	} else {
 		fmt.Printf("=== Done: %d/%d total slots booked ===\n", totalSuccess, totalSlots)
 		notify(fmt.Sprintf("Court bot done for %s: %d/%d slots booked (polls=%d fire=%s delay=%s)", targetDate, totalSuccess, totalSlots, pollAttempts, fireStr, fireDelayStr))
+	}
+}
+
+func printSchedules(cfg *config.Config) {
+	if len(cfg.Schedules) == 0 {
+		fmt.Printf("No schedules file loaded (%s).\n", scheduleFileLabel(cfg))
+		fmt.Printf("Target day: %s\n", cfg.TargetDay)
+		for _, acc := range cfg.Accounts {
+			fmt.Printf("\n  [%s]\n", acc.Name)
+			for _, entry := range acc.BookingPlan {
+				fmt.Printf("    %s → courts %v\n", entry.Slot, entry.Courts)
+			}
+		}
+		return
+	}
+	fmt.Printf("Schedules (%d) from %s:\n", len(cfg.Schedules), cfg.ScheduleFile)
+	for _, s := range cfg.Schedules {
+		accs, err := config.ResolveScheduleAccounts(s, cfg.Accounts)
+		names := ""
+		if err != nil {
+			names = "ERROR: " + err.Error()
+		} else {
+			for i, a := range accs {
+				if i > 0 {
+					names += ", "
+				}
+				names += a.Name
+			}
+		}
+		fmt.Printf("\n  %s: day=%s accounts=[%s]\n", s.Name, s.TargetDay, names)
+		for _, entry := range s.BookingPlan {
+			fmt.Printf("    %s → courts %v\n", entry.Slot, entry.Courts)
+		}
 	}
 }
 
@@ -919,7 +1166,8 @@ func cmdFacilities() {
 
 	fmt.Println("[1/2] Logging in...")
 	client := api.NewClient(cfg.BaseURL)
-	if err := client.Login(cfg.Email, cfg.Password); err != nil {
+	email, password, _ := primaryCredentials(cfg)
+	if err := client.Login(email, password); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
@@ -1079,7 +1327,8 @@ func cmdHealthCheck() {
 
 	fmt.Println("[1/2] Testing login...")
 	client := api.NewClient(cfg.BaseURL)
-	if err := client.Login(cfg.Email, cfg.Password); err != nil {
+	hcEmail, hcPassword, _ := primaryCredentials(cfg)
+	if err := client.Login(hcEmail, hcPassword); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: Login failed: %v\n", err)
 		fmt.Println("[2/2] Sending alert to Telegram...")
 

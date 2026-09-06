@@ -1,0 +1,12 @@
+# Copy to schedules.yaml and edit. Each schedule snipes independently.
+# Name: slug [a-z0-9-] (used by --schedule + cron). Accounts: [all] or
+# GPROP_ACCOUNT_N_NAME values. Booking plan syntax: slot>court1,court2;...
+schedules:
+  - name: fri-pickle
+    target_day: friday
+    booking_plan: "07:00-09:00>Pickleball Court P3,Pickleball Court P1,Pickleball Court P2"
+    accounts: [all]
+  - name: mon-badminton
+    target_day: monday
+    booking_plan: "18:00-20:00>Court A,Court B"
+    accounts: ["Account 1"]
