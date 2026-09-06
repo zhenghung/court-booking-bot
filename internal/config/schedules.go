@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -87,6 +88,9 @@ func LoadSchedulesFile(path string, accounts []Account) ([]Schedule, error) {
 			if !scheduleSlotRe.MatchString(e.Slot) {
 				return nil, fmt.Errorf("schedule %q: invalid slot %q (expected HH:MM-HH:MM)", name, e.Slot)
 			}
+			if err := validateSlotRange(e.Slot); err != nil {
+				return nil, fmt.Errorf("schedule %q: invalid slot %q: %w", name, e.Slot, err)
+			}
 		}
 
 		if len(s.Accounts) == 0 {
@@ -133,6 +137,27 @@ func LoadSchedulesFile(path string, accounts []Account) ([]Schedule, error) {
 		})
 	}
 	return out, nil
+}
+
+// validateSlotRange rejects impossible ranges like 99:99-99:99 or 09:00-08:00.
+// time.Parse enforces HH 00-23 and MM 00-59; we additionally require start < end.
+func validateSlotRange(slot string) error {
+	parts := strings.SplitN(slot, "-", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("expected HH:MM-HH:MM")
+	}
+	start, err := time.Parse("15:04", parts[0])
+	if err != nil {
+		return fmt.Errorf("bad start time: %w", err)
+	}
+	end, err := time.Parse("15:04", parts[1])
+	if err != nil {
+		return fmt.Errorf("bad end time: %w", err)
+	}
+	if !start.Before(end) {
+		return fmt.Errorf("start must be before end")
+	}
+	return nil
 }
 
 // SelectSchedules filters schedules by name. Empty names returns all.
