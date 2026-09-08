@@ -421,18 +421,11 @@ func cmdRun() {
 	useSchedules := len(cfg.Schedules) > 0
 
 	// Calculate target date: the date that opens at next midnight.
-	// At 59 23 daily, today+7 (Thu) != midnight+7 (Fri) — use midnight+7 for poll path.
+	// Unified: always next midnight +7 (so 59 23 Thu → Fri Sep 18, and --now near midnight consistent).
 	today := klNow()
 	midnightForTarget := time.Date(today.Year(), today.Month(), today.Day()+1, 0, 0, 0, 0, today.Location())
-	var targetDate string
-	var targetDateParsed time.Time
-	if *now {
-		targetDate = today.AddDate(0, 0, 7).Format("2006-01-02")
-		targetDateParsed, _ = time.Parse("2006-01-02", targetDate)
-	} else {
-		targetDate = midnightForTarget.AddDate(0, 0, 7).Format("2006-01-02")
-		targetDateParsed, _ = time.Parse("2006-01-02", targetDate)
-	}
+	targetDate := midnightForTarget.AddDate(0, 0, 7).Format("2006-01-02")
+	targetDateParsed, _ := time.Parse("2006-01-02", targetDate)
 
 	if useSchedules {
 		selected, err := config.SelectSchedules(cfg.Schedules, []string(scheduleNames))
