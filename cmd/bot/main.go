@@ -983,11 +983,54 @@ type TelegramUser struct {
 }
 
 func handleStatusCommand(cfg *config.Config) {
-	targetDay, _ := parseDayOfWeek(cfg.TargetDay)
+	// Schedule-aware status: daily file-DB cron is the source.
 	today := time.Now()
 	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
 	targetDateParsed, _ := time.Parse("2006-01-02", targetDate)
+	if len(cfg.Schedules) > 0 {
+		var lines string
+		for _, s := range cfg.Schedules {
+			day, _ := parseDayOfWeek(s.TargetDay)
+			// Next occurrence of this schedule's day
+			next := today
+			for next.Weekday() != day {
+				next = next.AddDate(0, 0, 1)
+			}
+			nextMidnight := time.Date(next.Year(), next.Month(), next.Day(), 0, 0, 0, 0, today.Location())
+			if nextMidnight.Before(today) {
+				nextMidnight = nextMidnight.AddDate(0, 0, 7)
+			}
+			accs, _ := config.ResolveScheduleAccounts(s, cfg.Accounts)
+			names := ""
+			for i, a := range accs {
+				if i > 0 {
+					names += ", "
+				}
+				names += a.Name
+			}
+			lines += fmt.Sprintf("\n\n📋 %s: %s (%d slot(s)) [%s]\n   Next: %s (%s)", s.Name, s.TargetDay, len(s.BookingPlan), names, nextMidnight.Format("Mon Jan 2 15:04"), time.Until(nextMidnight).Round(time.Minute))
+			for _, e := range s.BookingPlan {
+				lines += fmt.Sprintf("\n     • %s → %v", e.Slot, e.Courts)
+			}
+		}
+		cronDesc := "daily 00:00 MYT (file-DB gated)"
+		if cfg.ScheduleFile != "" {
+			cronDesc += " — " + cfg.ScheduleFile
+		}
+		status := fmt.Sprintf(`🥒🎾 Court Bot Status (file-DB)
 
+📆 Next booking date: %s (%s)
+⏰ Cron: %s
+👥 Accounts: %d
+
+Schedules:%s
+
+✅ Bot is running`,
+			targetDate, targetDateParsed.Weekday(), cronDesc, len(cfg.Accounts), lines)
+		_ = sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, status)
+		return
+	}
+	targetDay, _ := parseDayOfWeek(cfg.TargetDay)
 	nextFriday := today
 	for nextFriday.Weekday() != targetDay {
 		nextFriday = nextFriday.AddDate(0, 0, 1)
@@ -996,8 +1039,6 @@ func handleStatusCommand(cfg *config.Config) {
 	if nextRun.Before(today) {
 		nextRun = nextRun.AddDate(0, 0, 7)
 	}
-
-	// Build account/plan summary
 	var planStr string
 	totalSlots := 0
 	for _, acc := range cfg.Accounts {
@@ -1010,7 +1051,6 @@ func handleStatusCommand(cfg *config.Config) {
 			totalSlots++
 		}
 	}
-
 	status := fmt.Sprintf(`🥒🎾 Court Bot Status
 
 📅 Target day: %s
@@ -1022,35 +1062,58 @@ func handleStatusCommand(cfg *config.Config) {
 📋 Booking plan:%s
 
 ✅ Bot is running`,
-		cfg.TargetDay,
-		targetDate,
-		targetDateParsed.Weekday(),
-		nextRun.Format("Mon Jan 2, 15:04"),
-		time.Until(nextRun).Round(time.Minute),
-		len(cfg.Accounts),
-		totalSlots,
-		planStr,
-	)
-
+		cfg.TargetDay, targetDate, targetDateParsed.Weekday(), nextRun.Format("Mon Jan 2, 15:04"), time.Until(nextRun).Round(time.Minute), len(cfg.Accounts), totalSlots, planStr)
 	if err := sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, status); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: failed to send status: %v\n", err)
 	}
 }
 
 func handleSetDayCommand(botToken, chatID, dayInput string) {
-	if strings.TrimSpace(dayInput) == "" {
+	fields := strings.Fields(strings.TrimSpace(dayInput))
+	if len(fields) == 0 {
 		_ = sendTelegramMessage(botToken, chatID,
-			"Usage: /setday <day>\nExample: /setday monday\nAllowed: sunday, monday, tuesday, wednesday, thursday, friday, saturday")
+			"Usage:\n/setday <day>  (legacy, no schedules file)\n/setday <schedule> <day>  (file-DB)\nExample: /setday fri-pickle monday")
 		return
 	}
-
-	day, err := normalizeDayInput(dayInput)
+	// File-DB mode: requires schedules file
+	cfg, _ := config.Load()
+	if len(cfg.Schedules) > 0 {
+		if len(fields) != 2 {
+			_ = sendTelegramMessage(botToken, chatID,
+				"Usage: /setday <schedule> <day>\nExample: /setday fri-pickle monday\nSchedules: "+scheduleNamesList(cfg.Schedules))
+			return
+		}
+		schedName := strings.ToLower(strings.TrimSpace(fields[0]))
+		dayRaw := fields[1]
+		day, err := normalizeDayInput(dayRaw)
+		if err != nil {
+			_ = sendTelegramMessage(botToken, chatID,
+				fmt.Sprintf("❌ Invalid day: %q", dayRaw))
+			return
+		}
+		path := cfg.ScheduleFile
+		if path == "" {
+			path = "schedules.yaml"
+		}
+		if err := config.UpdateScheduleDay(path, schedName, day); err != nil {
+			_ = sendTelegramMessage(botToken, chatID, fmt.Sprintf("❌ Failed to update %s: %v", path, err))
+			return
+		}
+		_ = sendTelegramMessage(botToken, chatID,
+			fmt.Sprintf("✅ %s → %s (file-DB %s, daily cron unchanged)", schedName, day, path))
+		return
+	}
+	// Legacy single-schedule path
+	dayRaw := fields[0]
+	if len(fields) > 1 {
+		dayRaw = fields[len(fields)-1]
+	}
+	day, err := normalizeDayInput(dayRaw)
 	if err != nil {
 		_ = sendTelegramMessage(botToken, chatID,
-			fmt.Sprintf("❌ Invalid day: %q\nUse: sunday, monday, tuesday, wednesday, thursday, friday, saturday", dayInput))
+			fmt.Sprintf("❌ Invalid day: %q\nUse: sunday, monday, tuesday, wednesday, thursday, friday, saturday", dayRaw))
 		return
 	}
-
 	weekday, _ := parseDayOfWeek(day)
 	envPath := envFilePath()
 	originalEnv, err := setEnvKey(envPath, "GPROP_TARGET_DAY", day)
@@ -1058,7 +1121,6 @@ func handleSetDayCommand(botToken, chatID, dayInput string) {
 		_ = sendTelegramMessage(botToken, chatID, fmt.Sprintf("❌ Failed to update %s: %v", envPath, err))
 		return
 	}
-
 	cronLine, err := updateSchedulerCron(weekday)
 	if err != nil {
 		rollbackErr := os.WriteFile(envPath, originalEnv, 0o600)
@@ -1071,15 +1133,21 @@ func handleSetDayCommand(botToken, chatID, dayInput string) {
 			fmt.Sprintf("❌ Failed to update cron: %v\nℹ️ .env change was rolled back.", err))
 		return
 	}
-
 	if err := os.Setenv("GPROP_TARGET_DAY", day); err != nil {
 		_ = sendTelegramMessage(botToken, chatID,
 			fmt.Sprintf("⚠️ Day updated, but failed to refresh runtime env: %v", err))
 		return
 	}
-
 	_ = sendTelegramMessage(botToken, chatID,
 		fmt.Sprintf("✅ Booking day updated to %s\n🕛 Cron: %s", day, cronLine))
+}
+
+func scheduleNamesList(s []config.Schedule) string {
+	var out []string
+	for _, x := range s {
+		out = append(out, x.Name)
+	}
+	return strings.Join(out, ", ")
 }
 
 func handleBookingsCommand(cfg *config.Config) {
