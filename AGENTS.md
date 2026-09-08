@@ -28,6 +28,17 @@ Rules: docs/ is human truth, .env.example is config truth. Cross-link, never cop
 - Never work directly on `main`: no commit, push, or local merge.
 - Always use feature branch + GitHub PR; human squash-merges.
 
+### LLM Hard Guard (MUST enforce)
+
+Before any `git push`, `git commit`, `gh pr merge`, or `git merge`:
+
+1. Run `git rev-parse --abbrev-ref HEAD` — if `main`, STOP.
+2. Run `git diff --stat main...HEAD` and `git log --oneline main..HEAD` — verify scope.
+3. Create feature branch `fix|feat|docs/<slug>` if on `main`, then PR via `gh pr create`.
+4. Never `git push origin main`, never `gh pr merge` — human merges only.
+
+If asked to hotfix, still branch + PR. No `--no-verify`, no `--force`, no bypass.
+
 ## Gotchas
 
 - Cron uses Asia/Kuala_Lumpur; no CRON_TZ.
