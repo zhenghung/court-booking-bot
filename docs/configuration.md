@@ -47,8 +47,8 @@ as `HH:MM-HH:MM`), and `accounts`
 account's own plan is ignored in schedule mode. No file = legacy
 `GPROP_TARGET_DAY` + booking-plan path, unchanged.
 
-Cron is daily (`0 0 * * *`); the file is the DB — `run` skips schedules whose
-`target_day` doesn't match `today+7`. Manage by editing the file or
+Cron is daily (`59 23 * * *`); the file is the DB — `run` skips schedules whose
+`target_day` doesn't match `next midnight +7d` (KL) — 59 23 Thu → Fri+7. Manage by editing the file or
 `/setday <schedule> <day>` (Telegram edits the file atomically, no crontab
 change). Manual `--schedule` filter is for testing only.
 

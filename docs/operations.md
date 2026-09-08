@@ -4,10 +4,11 @@ Purpose: daily ops and incident response. Audience: humans.
 
 ## Change booking day
 
-Preferred (Telegram): `/setday monday`. Bot updates `GPROP_TARGET_DAY` and crontab.
+Preferred (Telegram, file-DB): `/setday fri-pickle monday` or `/setday sun-badminton tuesday`. Bot updates `~/.schedules.yaml` atomically (daily `59 23` cron unchanged).
 
-Manual fallback: update `GPROP_TARGET_DAY` in server `.env`, set crontab
-`0 0 * * 1` (1=Monday).
+Legacy (no schedules file): `/setday monday` updates `GPROP_TARGET_DAY` and crontab.
+
+Manual fallback: edit `~/.schedules.yaml` `target_day`, or legacy `GPROP_TARGET_DAY` in server `.env` + `59 23 * * *` crontab (daily file-DB) or `0 0 * * 1` legacy.
 
 ## Update booking plan
 

@@ -88,7 +88,7 @@ sequenceDiagram
 
 ## 5. run (midnight snipe)
 
-Cron: `59 23 * * * GPROP_SCHEDULES_FILE=... ./court-bot run` daily file-DB. Target date = today+7d (KL). Skips schedules whose `target_day` ≠ target weekday (log-only). Poll 500ms from 23:59:55 to 00:00:30, re-login at 23:59:30. `--now` skips wait (manual testing only). `--schedule NAME` filter is for manual testing only.
+Cron: `59 23 * * * GPROP_SCHEDULES_FILE=... ./court-bot run` daily file-DB. Target date = next midnight +7d (KL) — 59 23 Thu polls to 00:00 Fri then books Fri+7. Skips schedules whose `target_day` ≠ target weekday (log-only). Poll 500ms from 23:59:55 to 00:00:30, re-login at 23:59:30. `--now` skips wait (manual testing only, unified target). `--schedule NAME` filter is for manual testing only.
 
 ```mermaid
 sequenceDiagram
@@ -98,9 +98,9 @@ sequenceDiagram
     participant Gprop
     participant TG
     Cron->>CLI: run
-    CLI->>CLI: targetDate = today+7d<br/>check Weekday == TargetDay
-    alt wrong weekday and no --now
-        CLI->>TG: skipped notification, exit
+    CLI->>CLI: targetDate = next midnight +7d (KL)<br/>check Weekday == TargetDay
+    alt wrong weekday
+        CLI->>CLI: log skipped, exit (no Telegram — daily expected)
     else proceed
         loop each Account
             CLI->>Client: Login()
@@ -109,7 +109,7 @@ sequenceDiagram
         alt wait enabled (no --now)
             CLI->>CLI: sleep until T-30s, re-login all accounts
             CLI->>CLI: sleep until 23:59:55
-            loop poll every 200ms until 00:00:30
+            loop poll every 500ms until 00:00:30
                 CLI->>Client: GetTimeslots(primaryCourt, targetDate)
                 Client->>Gprop: POST get_booking_timeslot
                 Gprop-->>Client: slots
