@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,30 @@ func (stubBackend) Probe(date string, courts []string) (ProbeResult, error) {
 }
 func (stubBackend) Book(BookRequest) (BookResponse, error) {
 	return BookResponse{DryRun: true, Message: "Would book"}, nil
+}
+func (stubBackend) Schedules() (SchedulesPayload, error) {
+	return SchedulesPayload{Schedules: []ScheduleView{{Name: "fri-pickle", TargetDay: "friday", BookingPlan: []ScheduleEntry{{Slot: "07:00-09:00", Courts: []string{"P3"}}}, Accounts: []string{"all"}}}, Accounts: []string{"Primary"}}, nil
+}
+func (stubBackend) CreateSchedule(req ScheduleRequest) (ScheduleView, error) {
+	if req.Name == "duplicate" {
+		return ScheduleView{}, fmt.Errorf("schedule %q already exists", req.Name)
+	}
+	if req.TargetDay == "bad" {
+		return ScheduleView{}, fmt.Errorf("invalid target_day %q", req.TargetDay)
+	}
+	return ScheduleView{Name: req.Name, TargetDay: req.TargetDay, BookingPlan: req.BookingPlan, Accounts: req.Accounts}, nil
+}
+func (stubBackend) UpdateSchedule(name string, req ScheduleRequest) (ScheduleView, error) {
+	if name == "missing" {
+		return ScheduleView{}, fmt.Errorf("unknown schedule %q", name)
+	}
+	return ScheduleView{Name: req.Name, TargetDay: req.TargetDay}, nil
+}
+func (stubBackend) DeleteSchedule(name string) error {
+	if name == "missing" {
+		return fmt.Errorf("unknown schedule %q", name)
+	}
+	return nil
 }
 
 func TestHealthzNoAuth(t *testing.T) {

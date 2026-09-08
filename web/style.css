@@ -93,7 +93,30 @@ table.sheet th, table.sheet td {
 .error { color: var(--error); font-weight: 600; }
 .hint { color: #5c5747; }
 :focus-visible { outline: 3px solid var(--midnight); outline-offset: 2px; }
-@media (max-width: 700px) {
+.sched-header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+.sched-header h2 { margin:0; }
+.sched-layout { display:grid; grid-template-columns: 340px 1fr; gap:16px; margin-top:12px; }
+.sched-list { display:flex; flex-direction:column; gap:8px; }
+.sched-card { border:1px solid #E4DECB; border-radius:6px; padding:12px; background:#fff; cursor:pointer; text-align:left; }
+.sched-card.active { border-color:var(--midnight); box-shadow:0 0 0 2px var(--midnight) inset; }
+.sched-card:hover { border-color:var(--midnight); }
+.sched-day { display:inline-block; background:var(--midnight); color:#F6F3E8; border-radius:12px; padding:2px 8px; font-size:12px; font-weight:700; letter-spacing:0.02em; }
+.sched-name { font-weight:700; font-size:15px; }
+.sched-meta { font-size:13px; color:#5c5747; margin-top:4px; }
+.sched-slot { font-variant-numeric: tabular-nums; font-size:13px; }
+.sched-editor { border:1px solid #E4DECB; border-radius:6px; padding:16px; background:#fff; }
+.slot-row { border:1px solid #E4DECB; border-radius:6px; padding:10px; margin-bottom:10px; background: #FFFDF6; }
+.slot-row-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.slot-row-head input[type="text"] { flex:1; min-width:140px; }
+.chip { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #E4DECB; border-radius:20px; padding:4px 8px; font-size:13px; }
+.chip button { border:none; background:transparent; cursor:pointer; padding:0 2px; color:#5c5747; font-weight:700; }
+.chip button:hover { color:var(--error); }
+.chip-group { display:flex; flex-wrap:wrap; gap:6px; min-height:32px; align-items:center; }
+.court-add { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; align-items:center; }
+.court-add select { flex:1; min-width:180px; }
+.editor-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+@media (max-width: 900px) {
+  .sched-layout { grid-template-columns: 1fr; }
   .sheet-wrap { overflow-x: auto; }
 }
 @media (prefers-reduced-motion: reduce) {

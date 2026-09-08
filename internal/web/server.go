@@ -20,11 +20,39 @@ type AccountView struct {
 }
 
 type StatusPayload struct {
-	TargetDay   string        `json:"targetDay"`
-	TargetDate  string        `json:"targetDate"`
-	NextRun     string        `json:"nextRun,omitempty"`
-	Accounts    []AccountView `json:"accounts"`
-	BookingPlan []string      `json:"bookingPlan,omitempty"`
+	TargetDay   string         `json:"targetDay"`
+	TargetDate  string         `json:"targetDate"`
+	NextRun     string         `json:"nextRun,omitempty"`
+	Accounts    []AccountView  `json:"accounts"`
+	BookingPlan []string       `json:"bookingPlan,omitempty"`
+	Schedules   []ScheduleView `json:"schedules,omitempty"`
+}
+
+type ScheduleEntry struct {
+	Slot   string   `json:"slot"`
+	Courts []string `json:"courts"`
+}
+
+type ScheduleView struct {
+	Name        string          `json:"name"`
+	TargetDay   string          `json:"targetDay"`
+	BookingPlan []ScheduleEntry `json:"bookingPlan"`
+	Accounts    []string        `json:"accounts"`
+	NextRun     string          `json:"nextRun,omitempty"`
+	Courts      []string        `json:"courts,omitempty"`
+}
+
+type SchedulesPayload struct {
+	Schedules    []ScheduleView `json:"schedules"`
+	Accounts     []string       `json:"accounts"`
+	ScheduleFile string         `json:"scheduleFile"`
+}
+
+type ScheduleRequest struct {
+	Name        string          `json:"name"`
+	TargetDay   string          `json:"targetDay"`
+	BookingPlan []ScheduleEntry `json:"bookingPlan"`
+	Accounts    []string        `json:"accounts"`
 }
 
 type FacilityView struct {
@@ -92,6 +120,10 @@ type Backend interface {
 	Bookings() ([]AccountBookings, error)
 	Probe(date string, courts []string) (ProbeResult, error)
 	Book(req BookRequest) (BookResponse, error)
+	Schedules() (SchedulesPayload, error)
+	CreateSchedule(req ScheduleRequest) (ScheduleView, error)
+	UpdateSchedule(name string, req ScheduleRequest) (ScheduleView, error)
+	DeleteSchedule(name string) error
 }
 
 type ServerOptions struct {
@@ -144,6 +176,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/bookings", s.requireAuth(s.handleBookings))
 	mux.HandleFunc("/api/probe", s.requireAuth(s.handleProbe))
 	mux.HandleFunc("/api/book", s.requireAuth(s.requireCSRF(s.handleBook)))
+	mux.HandleFunc("/api/schedules", s.requireAuth(s.handleSchedules))
+	mux.HandleFunc("/api/schedules/", s.requireAuth(s.handleScheduleByName))
 	mux.HandleFunc("/", s.handleIndex)
 	return mux
 }
@@ -327,7 +361,7 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) requireCSRF(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete {
 			next(w, r)
 			return
 		}
@@ -442,4 +476,100 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleSchedules(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		payload, err := s.backend.Schedules()
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, payload)
+	case http.MethodPost:
+		var req ScheduleRequest
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid body")
+			return
+		}
+		view, err := s.backend.CreateSchedule(req)
+		if err != nil {
+			if isValidationError(err) {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if isConflictError(err) {
+				writeErr(w, http.StatusConflict, err.Error())
+				return
+			}
+			writeErr(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusCreated, view)
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) handleScheduleByName(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/schedules/")
+	name = strings.TrimSpace(name)
+	if name == "" || strings.Contains(name, "/") {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var req ScheduleRequest
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid body")
+			return
+		}
+		view, err := s.backend.UpdateSchedule(name, req)
+		if err != nil {
+			if isValidationError(err) {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if isConflictError(err) {
+				writeErr(w, http.StatusConflict, err.Error())
+				return
+			}
+			if isNotFoundError(err) {
+				writeErr(w, http.StatusNotFound, err.Error())
+				return
+			}
+			writeErr(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+	case http.MethodDelete:
+		if err := s.backend.DeleteSchedule(name); err != nil {
+			if isNotFoundError(err) {
+				writeErr(w, http.StatusNotFound, err.Error())
+				return
+			}
+			writeErr(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func isValidationError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "must match") || strings.Contains(msg, "invalid") || strings.Contains(msg, "booking_plan") || strings.Contains(msg, "accounts") || strings.Contains(msg, "slot") || strings.Contains(msg, "at least")
+}
+
+func isConflictError(err error) bool {
+	return strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "already exists")
+}
+
+func isNotFoundError(err error) bool {
+	return strings.Contains(err.Error(), "unknown schedule")
 }

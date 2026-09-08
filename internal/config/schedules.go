@@ -259,6 +259,158 @@ func UpdateScheduleDay(path, name, newDay string) error {
 	return os.Rename(tmp, path)
 }
 
+// FormatBookingPlan serializes []BookingEntry to "slot>court1,court2;..." .
+func FormatBookingPlan(plan []BookingEntry) string {
+	var parts []string
+	for _, e := range plan {
+		parts = append(parts, e.Slot+">"+strings.Join(e.Courts, ","))
+	}
+	return strings.Join(parts, ";")
+}
+
+// ValidateSchedule validates a single schedule's fields without file I/O.
+func ValidateSchedule(s Schedule, accounts []Account) error {
+	if !scheduleSlugRe.MatchString(s.Name) {
+		return fmt.Errorf("name must match [a-z0-9-]+ (no spaces)")
+	}
+	day := strings.ToLower(strings.TrimSpace(s.TargetDay))
+	if !validDays[day] {
+		return fmt.Errorf("invalid target_day %q", s.TargetDay)
+	}
+	if len(s.BookingPlan) == 0 {
+		return fmt.Errorf("booking_plan must have at least one entry")
+	}
+	for _, e := range s.BookingPlan {
+		if !scheduleSlotRe.MatchString(e.Slot) {
+			return fmt.Errorf("invalid slot %q (expected HH:MM-HH:MM)", e.Slot)
+		}
+		if err := validateSlotRange(e.Slot); err != nil {
+			return fmt.Errorf("invalid slot %q: %w", e.Slot, err)
+		}
+		if len(e.Courts) == 0 {
+			return fmt.Errorf("slot %q: at least one court required", e.Slot)
+		}
+	}
+	if len(s.AccountNames) == 0 {
+		return fmt.Errorf("accounts must be set ([all] or account names)")
+	}
+	hasAll := false
+	for _, n := range s.AccountNames {
+		if n == "all" {
+			hasAll = true
+			break
+		}
+	}
+	if hasAll && len(s.AccountNames) > 1 {
+		return fmt.Errorf("accounts cannot mix \"all\" with names")
+	}
+	if !hasAll {
+		known := map[string]bool{}
+		for _, acc := range accounts {
+			known[acc.Name] = true
+		}
+		for _, n := range s.AccountNames {
+			if !known[n] {
+				return fmt.Errorf("unknown account %q", n)
+			}
+		}
+	}
+	return nil
+}
+
+// SaveSchedulesFile atomically writes the given schedules to path (validated).
+func SaveSchedulesFile(path string, schedules []Schedule, accounts []Account) error {
+	seen := map[string]bool{}
+	for _, s := range schedules {
+		if seen[s.Name] {
+			return fmt.Errorf("schedule %q: duplicate name", s.Name)
+		}
+		seen[s.Name] = true
+		if err := ValidateSchedule(s, accounts); err != nil {
+			return fmt.Errorf("schedule %q: %w", s.Name, err)
+		}
+	}
+	var raw schedulesFile
+	for _, s := range schedules {
+		raw.Schedules = append(raw.Schedules, scheduleYAML{
+			Name:        s.Name,
+			TargetDay:   strings.ToLower(strings.TrimSpace(s.TargetDay)),
+			BookingPlan: FormatBookingPlan(s.BookingPlan),
+			Accounts:    append([]string{}, s.AccountNames...),
+		})
+	}
+	out, err := yaml.Marshal(&raw)
+	if err != nil {
+		return fmt.Errorf("marshal schedules file: %w", err)
+	}
+	var check schedulesFile
+	if err := yaml.Unmarshal(out, &check); err != nil {
+		return fmt.Errorf("validate schedules file: %w", err)
+	}
+	loaded, err := func() ([]Schedule, error) {
+		tmpPath := path + ".validate.tmp"
+		if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
+			return nil, err
+		}
+		defer os.Remove(tmpPath)
+		return LoadSchedulesFile(tmpPath, accounts)
+	}()
+	if err != nil {
+		return err
+	}
+	_ = loaded
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// UpsertSchedule adds or replaces a schedule in the file.
+func UpsertSchedule(path string, schedule Schedule, accounts []Account) error {
+	var existing []Schedule
+	if path != "" {
+		if s, err := LoadSchedulesFile(path, accounts); err != nil {
+			return err
+		} else {
+			existing = s
+		}
+	}
+	found := false
+	for i, s := range existing {
+		if s.Name == schedule.Name {
+			existing[i] = schedule
+			found = true
+			break
+		}
+	}
+	if !found {
+		existing = append(existing, schedule)
+	}
+	return SaveSchedulesFile(path, existing, accounts)
+}
+
+// DeleteSchedule removes a schedule by name from the file.
+func DeleteSchedule(path, name string, accounts []Account) error {
+	existing, err := LoadSchedulesFile(path, accounts)
+	if err != nil {
+		return err
+	}
+	var out []Schedule
+	found := false
+	for _, s := range existing {
+		if s.Name == name {
+			found = true
+			continue
+		}
+		out = append(out, s)
+	}
+	if !found {
+		return fmt.Errorf("unknown schedule %q", name)
+	}
+	return SaveSchedulesFile(path, out, accounts)
+}
+
 // resolveScheduleFilePath returns the schedules file to load, or "" if none exists.
 // Order: GPROP_SCHEDULES_FILE -> ./schedules.yaml -> ~/.schedules.yaml.
 func resolveScheduleFilePath(explicit string) string {

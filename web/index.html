@@ -27,6 +27,7 @@
 <div id="app" hidden>
   <nav class="tabs" role="tablist">
     <button data-view="dashboard" class="active">Dashboard</button>
+    <button data-view="schedules">Schedules</button>
     <button data-view="bookings">Bookings</button>
     <button data-view="probe">Probe</button>
     <button data-view="book">Book</button>
@@ -34,6 +35,34 @@
   </nav>
   <main>
     <section id="view-dashboard" class="card"><h2>Status</h2><div id="statusBox">Loading…</div></section>
+    <section id="view-schedules" class="card" hidden>
+      <div class="sched-header">
+        <h2>Schedules</h2>
+        <div class="sched-actions"><button class="primary" id="newScheduleBtn">+ New schedule</button> <button class="ghost" id="refreshSchedulesBtn">Refresh</button></div>
+      </div>
+      <p class="hint" id="schedFileHint"></p>
+      <div id="schedError" class="error" role="alert"></div>
+      <div class="sched-layout">
+        <div class="sched-list" id="schedList">Loading…</div>
+        <div class="sched-editor" id="schedEditor" hidden>
+          <h3 id="schedEditorTitle">New schedule</h3>
+          <label for="edName">Name <span class="hint">(slug a-z0-9-)</span></label><input id="edName" type="text" placeholder="fri-pickle" maxlength="40">
+          <label for="edDay">Day</label>
+          <select id="edDay"><option value="monday">Monday</option><option value="tuesday">Tuesday</option><option value="wednesday">Wednesday</option><option value="thursday">Thursday</option><option value="friday">Friday</option><option value="saturday">Saturday</option><option value="sunday">Sunday</option></select>
+          <label>Accounts</label>
+          <div id="edAccounts" class="chip-group"></div>
+          <label>Slots</label>
+          <div id="edSlots"></div>
+          <p><button class="ghost" id="addSlotBtn" type="button">+ Add slot</button></p>
+          <p class="error" id="edError" role="alert"></p>
+          <div class="editor-actions">
+            <button class="primary" id="saveSchedBtn">Save</button>
+            <button class="ghost" id="deleteSchedBtn">Delete</button>
+            <button class="ghost" id="cancelSchedBtn">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </section>
     <section id="view-bookings" class="card" hidden><h2>Upcoming bookings</h2><div id="bookingsBox">Loading…</div></section>
     <section id="view-probe" class="card" hidden>
       <h2>Probe availability</h2>

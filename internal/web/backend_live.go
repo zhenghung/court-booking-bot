@@ -45,13 +45,175 @@ func (b *LiveBackend) Status() StatusPayload {
 			plan = append(plan, e.Slot+" > "+join(e.Courts, ","))
 		}
 	}
+	schedules := b.cfg.GetSchedules()
+	var sv []ScheduleView
+	for _, s := range schedules {
+		sv = append(sv, scheduleToView(s, now))
+	}
 	return StatusPayload{
 		TargetDay:   titleDay(b.cfg.TargetDay),
 		TargetDate:  targetDate,
 		NextRun:     nextRun(now, b.cfg.TargetDay),
 		Accounts:    accounts,
 		BookingPlan: plan,
+		Schedules:   sv,
 	}
+}
+
+func scheduleToView(s config.Schedule, now time.Time) ScheduleView {
+	var plan []ScheduleEntry
+	var courts []string
+	seen := map[string]bool{}
+	for _, e := range s.BookingPlan {
+		plan = append(plan, ScheduleEntry{Slot: e.Slot, Courts: append([]string{}, e.Courts...)})
+		for _, c := range e.Courts {
+			if !seen[c] {
+				seen[c] = true
+				courts = append(courts, c)
+			}
+		}
+	}
+	return ScheduleView{
+		Name:        s.Name,
+		TargetDay:   s.TargetDay,
+		BookingPlan: plan,
+		Accounts:    append([]string{}, s.AccountNames...),
+		NextRun:     nextRun(now, s.TargetDay),
+		Courts:      courts,
+	}
+}
+
+func (b *LiveBackend) Schedules() (SchedulesPayload, error) {
+	schedules := b.cfg.GetSchedules()
+	var sv []ScheduleView
+	now := klNow()
+	for _, s := range schedules {
+		sv = append(sv, scheduleToView(s, now))
+	}
+	var accNames []string
+	for _, a := range b.cfg.Accounts {
+		accNames = append(accNames, a.Name)
+	}
+	return SchedulesPayload{Schedules: sv, Accounts: accNames, ScheduleFile: b.cfg.GetScheduleFile()}, nil
+}
+
+func scheduleFromRequest(req ScheduleRequest) (config.Schedule, error) {
+	name := strings.TrimSpace(req.Name)
+	day := strings.ToLower(strings.TrimSpace(req.TargetDay))
+	var plan []config.BookingEntry
+	for _, e := range req.BookingPlan {
+		slot := strings.TrimSpace(e.Slot)
+		var courts []string
+		for _, c := range e.Courts {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				courts = append(courts, c)
+			}
+		}
+		if slot == "" && len(courts) == 0 {
+			continue
+		}
+		plan = append(plan, config.BookingEntry{Slot: slot, Courts: courts})
+	}
+	var accs []string
+	for _, a := range req.Accounts {
+		a = strings.TrimSpace(a)
+		if a != "" {
+			accs = append(accs, a)
+		}
+	}
+	s := config.Schedule{Name: name, TargetDay: day, BookingPlan: plan, AccountNames: accs}
+	if err := config.ValidateSchedule(s, nil); err != nil {
+		// fallback validate with accounts if nil failed on unknown account check; will re-check with real accounts
+	}
+	return s, nil
+}
+
+func (b *LiveBackend) CreateSchedule(req ScheduleRequest) (ScheduleView, error) {
+	s, _ := scheduleFromRequest(req)
+	if err := config.ValidateSchedule(s, b.cfg.Accounts); err != nil {
+		return ScheduleView{}, err
+	}
+	for _, exist := range b.cfg.GetSchedules() {
+		if exist.Name == s.Name {
+			return ScheduleView{}, fmt.Errorf("schedule %q already exists", s.Name)
+		}
+	}
+	path := b.cfg.EffectiveScheduleFile()
+	existing := b.cfg.GetSchedules()
+	existing = append(existing, s)
+	if err := config.SaveSchedulesFile(path, existing, b.cfg.Accounts); err != nil {
+		return ScheduleView{}, err
+	}
+	b.cfg.SetSchedules(existing, path)
+	log.Printf("schedule created: name=%s file=%s", s.Name, path)
+	return scheduleToView(s, klNow()), nil
+}
+
+func (b *LiveBackend) UpdateSchedule(name string, req ScheduleRequest) (ScheduleView, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ScheduleView{}, fmt.Errorf("schedule name required")
+	}
+	s, _ := scheduleFromRequest(req)
+	// allow rename: if req.Name differs, treat as new name
+	if s.Name == "" {
+		s.Name = name
+	}
+	if err := config.ValidateSchedule(s, b.cfg.Accounts); err != nil {
+		return ScheduleView{}, err
+	}
+	existing := b.cfg.GetSchedules()
+	found := false
+	for i, cur := range existing {
+		if cur.Name == name {
+			// if renaming, check duplicate
+			if s.Name != name {
+				for _, other := range existing {
+					if other.Name == s.Name {
+						return ScheduleView{}, fmt.Errorf("schedule %q already exists", s.Name)
+					}
+				}
+			}
+			existing[i] = s
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ScheduleView{}, fmt.Errorf("unknown schedule %q", name)
+	}
+	path := b.cfg.EffectiveScheduleFile()
+	if err := config.SaveSchedulesFile(path, existing, b.cfg.Accounts); err != nil {
+		return ScheduleView{}, err
+	}
+	b.cfg.SetSchedules(existing, path)
+	log.Printf("schedule updated: %s -> %s file=%s", name, s.Name, path)
+	return scheduleToView(s, klNow()), nil
+}
+
+func (b *LiveBackend) DeleteSchedule(name string) error {
+	name = strings.TrimSpace(name)
+	existing := b.cfg.GetSchedules()
+	var out []config.Schedule
+	found := false
+	for _, s := range existing {
+		if s.Name == name {
+			found = true
+			continue
+		}
+		out = append(out, s)
+	}
+	if !found {
+		return fmt.Errorf("unknown schedule %q", name)
+	}
+	path := b.cfg.EffectiveScheduleFile()
+	if err := config.SaveSchedulesFile(path, out, b.cfg.Accounts); err != nil {
+		return err
+	}
+	b.cfg.SetSchedules(out, path)
+	log.Printf("schedule deleted: name=%s file=%s", name, path)
+	return nil
 }
 
 // nextRun returns the next midnight (KL) whose weekday matches targetDay,
