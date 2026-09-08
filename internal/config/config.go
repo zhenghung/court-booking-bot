@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/joho/godotenv"
 )
@@ -71,6 +72,7 @@ type Config struct {
 	// Empty when no file exists — legacy TargetDay + account-plan path stays.
 	Schedules    []Schedule
 	ScheduleFile string
+	mu           sync.RWMutex
 
 	TelegramBotToken string
 	TelegramChatID   string
@@ -79,6 +81,57 @@ type Config struct {
 	UIPassword string
 	UIPort     string
 	UIBind     string
+}
+
+// GetSchedules returns a copy of schedules under read lock.
+func (c *Config) GetSchedules() []Schedule {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]Schedule, len(c.Schedules))
+	copy(out, c.Schedules)
+	return out
+}
+
+// GetScheduleFile returns the schedules file path under read lock.
+func (c *Config) GetScheduleFile() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ScheduleFile
+}
+
+// EffectiveScheduleFile returns the file that will be written on save.
+func (c *Config) EffectiveScheduleFile() string {
+	if p := c.GetScheduleFile(); p != "" {
+		return p
+	}
+	if explicit := strings.TrimSpace(os.Getenv("GPROP_SCHEDULES_FILE")); explicit != "" {
+		return explicit
+	}
+	if _, err := os.Stat("schedules.yaml"); err == nil {
+		return "schedules.yaml"
+	}
+	return "schedules.yaml"
+}
+
+// SetSchedules atomically replaces schedules and file path (hot-reload after write).
+func (c *Config) SetSchedules(schedules []Schedule, file string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Schedules = schedules
+	if file != "" {
+		c.ScheduleFile = file
+	}
+}
+
+// ReloadSchedules re-reads the file from disk and updates in-memory state.
+func (c *Config) ReloadSchedules() error {
+	path := c.EffectiveScheduleFile()
+	schedules, err := LoadSchedulesFile(path, c.Accounts)
+	if err != nil {
+		return err
+	}
+	c.SetSchedules(schedules, path)
+	return nil
 }
 
 // parseBookingPlan parses a booking plan string like "07:00-08:00>7937,7936;08:00-09:00>7937".
@@ -264,6 +317,8 @@ func Load() (*Config, error) {
 
 	// Load optional schedules file. Missing file = legacy path (noop).
 	// An explicit GPROP_SCHEDULES_FILE that does not exist is an error (typo guard).
+	// An existing but empty file is valid — deleting the last schedule empties it;
+	// file-DB mode (ScheduleFile set) then means "nothing scheduled", never legacy.
 	explicit := strings.TrimSpace(os.Getenv("GPROP_SCHEDULES_FILE"))
 	if explicit != "" {
 		if _, err := os.Stat(explicit); err != nil {
@@ -275,9 +330,6 @@ func Load() (*Config, error) {
 		schedules, err := LoadSchedulesFile(explicit, cfg.Accounts)
 		if err != nil {
 			return nil, err
-		}
-		if len(schedules) == 0 {
-			return nil, fmt.Errorf("schedules file %q defines no schedules", explicit)
 		}
 		cfg.Schedules = schedules
 		cfg.ScheduleFile = explicit

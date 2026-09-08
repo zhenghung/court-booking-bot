@@ -158,7 +158,7 @@ func cmdProbe() {
 		facilityIDs = []string{*facilityID}
 	}
 	if *scheduleName != "" {
-		if len(cfg.Schedules) == 0 {
+		if cfg.ScheduleFile == "" {
 			fmt.Fprintf(os.Stderr, "ERROR: --schedule %q given but no schedules file loaded (%s)\n", *scheduleName, scheduleFileLabel(cfg))
 			os.Exit(1)
 		}
@@ -268,7 +268,7 @@ func cmdBook() {
 		bookUnitID, bookName, bookContact = cfg.Accounts[0].UnitID, cfg.Accounts[0].BookingName, cfg.Accounts[0].Contact
 	}
 	if *scheduleName != "" {
-		if len(cfg.Schedules) == 0 {
+		if cfg.ScheduleFile == "" {
 			fmt.Fprintf(os.Stderr, "ERROR: --schedule %q given but no schedules file loaded (%s)\n", *scheduleName, scheduleFileLabel(cfg))
 			os.Exit(1)
 		}
@@ -418,7 +418,7 @@ func cmdRun() {
 	}
 	var units []runUnit
 	var skipped []string
-	useSchedules := len(cfg.Schedules) > 0
+	useSchedules := cfg.ScheduleFile != "" // file-DB mode even when empty (deleted all schedules)
 
 	// Calculate target date: the date that opens at next midnight.
 	// Unified: always next midnight +7 (so 59 23 Thu → Fri Sep 18, and --now near midnight consistent).
@@ -838,7 +838,7 @@ func cmdRun() {
 }
 
 func printSchedules(cfg *config.Config) {
-	if len(cfg.Schedules) == 0 {
+	if cfg.ScheduleFile == "" {
 		fmt.Printf("No schedules file loaded (%s).\n", scheduleFileLabel(cfg))
 		fmt.Printf("Target day: %s\n", cfg.TargetDay)
 		for _, acc := range cfg.Accounts {
@@ -850,6 +850,9 @@ func printSchedules(cfg *config.Config) {
 		return
 	}
 	fmt.Printf("Schedules (%d) from %s:\n", len(cfg.Schedules), cfg.ScheduleFile)
+	if len(cfg.Schedules) == 0 {
+		fmt.Println("  (empty — nothing scheduled; legacy booking plan is NOT used while file-DB is set)")
+	}
 	for _, s := range cfg.Schedules {
 		accs, err := config.ResolveScheduleAccounts(s, cfg.Accounts)
 		names := ""
@@ -1015,7 +1018,7 @@ func handleStatusCommand(cfg *config.Config) {
 	today := klNow()
 	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
 	targetDateParsed, _ := time.Parse("2006-01-02", targetDate)
-	if len(cfg.Schedules) > 0 {
+	if cfg.ScheduleFile != "" {
 		var lines string
 		for _, s := range cfg.Schedules {
 			day, _ := parseDayOfWeek(s.TargetDay)
@@ -1105,7 +1108,7 @@ func handleSetDayCommand(botToken, chatID, dayInput string) {
 	}
 	// File-DB mode: requires schedules file
 	cfg, _ := config.Load()
-	if len(cfg.Schedules) > 0 {
+	if cfg.ScheduleFile != "" {
 		if len(fields) != 2 {
 			_ = sendTelegramMessage(botToken, chatID,
 				"Usage: /setday <schedule> <day>\nExample: /setday fri-pickle monday\nSchedules: "+scheduleNamesList(cfg.Schedules))
