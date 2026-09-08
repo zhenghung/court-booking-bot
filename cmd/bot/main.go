@@ -449,12 +449,7 @@ func cmdRun() {
 				fmt.Printf("  - %s\n", sk)
 			}
 			fmt.Println("Run with --now to override and book anyway.")
-			if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
-				msg := fmt.Sprintf("Court bot skipped: %d schedule(s) skipped for %s (%s)", len(skipped), targetDate, targetDateParsed.Weekday())
-				if err := sendTelegramMessage(cfg.TelegramBotToken, cfg.TelegramChatID, msg); err != nil {
-					fmt.Fprintf(os.Stderr, "WARN: failed to send Telegram notification: %v\n", err)
-				}
-			}
+			// Daily file-DB cron: expected skip, don't spam Telegram.
 			return
 		}
 	} else {
