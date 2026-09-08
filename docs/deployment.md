@@ -37,10 +37,10 @@ CWD). See [configuration](configuration.md) for the schema.
 
 | Schedule | Command | Purpose |
 |----------|---------|---------|
-| `0 0 * * *` | `GPROP_SCHEDULES_FILE=/home/ubuntu/.schedules.yaml ./court-bot run --now >> /home/ubuntu/court-bot.log 2>&1` | Daily file-DB snipe 00:00 MYT — skips if no schedule matches today+7 |
+| `59 23 * * *` | `GPROP_SCHEDULES_FILE=/home/ubuntu/.schedules.yaml ./court-bot run >> /home/ubuntu/court-bot.log 2>&1` | Daily file-DB snipe 23:59 MYT — poll 500ms from 23:59:55, skips if no schedule matches today+7 |
 | `0 8 * * *` | `./court-bot health-check >> /home/ubuntu/health-check.log 2>&1` | Daily login check, alerts on failure only |
 
-Cron is now daily; weekday comes from each schedule's `target_day` in `~/.schedules.yaml` (change via `/setday <schedule> <day>` or editing the file — no crontab edit needed, see [operations](operations.md)).
+Cron is daily 23:59; weekday comes from each schedule's `target_day` in `~/.schedules.yaml` (change via `/setday <schedule> <day>` or editing the file — no crontab edit needed, see [operations](operations.md)). `--now` is for manual testing only.
 
 Server paths: binary `/home/ubuntu/court-bot`, env `/home/ubuntu/.env`,
 schedules `/home/ubuntu/.schedules.yaml`, logs `/home/ubuntu/court-bot.log`.
