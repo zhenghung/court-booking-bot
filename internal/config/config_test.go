@@ -198,8 +198,12 @@ func TestLoadExplicitSchedulesFileEmpty(t *testing.T) {
 	t.Setenv("GPROP_TARGET_DAY", "friday")
 	t.Setenv("GPROP_BOOKING_PLAN", "07:00-09:00>P1")
 	t.Setenv("GPROP_SCHEDULES_FILE", writeSchedulesFile(t, "schedules: []\n"))
-	if _, err := Load(); err == nil {
-		t.Fatal("expected explicit empty file error, got nil")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("empty explicit file should load (deleting last schedule empties it): %v", err)
+	}
+	if len(cfg.Schedules) != 0 || cfg.ScheduleFile == "" {
+		t.Fatalf("want empty schedules + ScheduleFile set, got %d %q", len(cfg.Schedules), cfg.ScheduleFile)
 	}
 }
 
@@ -262,6 +266,44 @@ func TestScheduleCourts(t *testing.T) {
 	courts := ScheduleCourts(s)
 	if len(courts) != 3 {
 		t.Fatalf("expected 3 unique courts, got %v", courts)
+	}
+}
+
+func TestDeleteScheduleLastLeavesEmptyFile(t *testing.T) {
+	path := writeSchedulesFile(t, `schedules:
+  - name: fri-pickle
+    target_day: friday
+    booking_plan: "07:00-08:00>P1"
+    accounts: [all]
+`)
+	if err := DeleteSchedule(path, "fri-pickle", testAccounts()); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	got, err := LoadSchedulesFile(path, testAccounts())
+	if err != nil {
+		t.Fatalf("empty file should load, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want 0 schedules, got %d", len(got))
+	}
+}
+
+func TestSaveSchedulesFileEmptyRoundTrip(t *testing.T) {
+	path := writeSchedulesFile(t, `schedules:
+  - name: fri-pickle
+    target_day: friday
+    booking_plan: "07:00-08:00>P1"
+    accounts: [all]
+`)
+	if err := SaveSchedulesFile(path, nil, testAccounts()); err != nil {
+		t.Fatalf("save empty: %v", err)
+	}
+	got, err := LoadSchedulesFile(path, testAccounts())
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want 0 schedules, got %d", len(got))
 	}
 }
 

@@ -3,8 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
-	"sync"
 	"strings"
+	"sync"
 
 	"github.com/joho/godotenv"
 )
@@ -317,6 +317,8 @@ func Load() (*Config, error) {
 
 	// Load optional schedules file. Missing file = legacy path (noop).
 	// An explicit GPROP_SCHEDULES_FILE that does not exist is an error (typo guard).
+	// An existing but empty file is valid — deleting the last schedule empties it;
+	// file-DB mode (ScheduleFile set) then means "nothing scheduled", never legacy.
 	explicit := strings.TrimSpace(os.Getenv("GPROP_SCHEDULES_FILE"))
 	if explicit != "" {
 		if _, err := os.Stat(explicit); err != nil {
@@ -328,9 +330,6 @@ func Load() (*Config, error) {
 		schedules, err := LoadSchedulesFile(explicit, cfg.Accounts)
 		if err != nil {
 			return nil, err
-		}
-		if len(schedules) == 0 {
-			return nil, fmt.Errorf("schedules file %q defines no schedules", explicit)
 		}
 		cfg.Schedules = schedules
 		cfg.ScheduleFile = explicit
