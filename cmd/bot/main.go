@@ -580,6 +580,7 @@ func cmdRun() {
 	pollAttempts := 0
 	var fireTime time.Time
 	var midnight time.Time
+	reloginFailed := map[string]bool{}
 	if !*now {
 		midnight = midnightForTarget
 		waitDuration := time.Until(midnight)
@@ -591,14 +592,15 @@ func cmdRun() {
 			time.Sleep(preLoginWait)
 			fmt.Println("  Re-authenticating all accounts...")
 			for _, acc := range uniqAccounts {
-				// Login now retries internally (Task 2), just log attempt
 				fmt.Printf("  %s: re-login... ", acc.Name)
 				if err := clients[acc.Email].Login(acc.Email, acc.Password); err != nil {
-					notify(fmt.Sprintf("Court bot error: re-login failed for %s - %v", acc.Name, err))
-					fmt.Fprintf(os.Stderr, "ERROR re-login %s: %v\n", acc.Name, err)
-					os.Exit(1)
+					// 5xx/transient at 23:59:30 must not kill whole snipe — keep polling, retry at fire
+					reloginFailed[acc.Email] = true
+					notify(fmt.Sprintf("Court bot warn: re-login failed for %s - %v (will retry at fire)", acc.Name, err))
+					fmt.Fprintf(os.Stderr, "WARN re-login %s: %v — continuing to poll, will retry login before booking\n", acc.Name, err)
+				} else {
+					fmt.Println("OK")
 				}
-				fmt.Println("OK")
 			}
 		}
 
@@ -702,6 +704,23 @@ func cmdRun() {
 		fmt.Println("[2/3] Skipping midnight wait (--now flag)")
 	}
 	fmt.Println()
+
+	// Ensure sessions before fire — retry only accounts that failed at 23:59:30, no kill on 5xx
+	if !*now && len(reloginFailed) > 0 {
+		fmt.Println("  Retrying failed sessions before booking...")
+		for _, acc := range uniqAccounts {
+			if !reloginFailed[acc.Email] {
+				continue
+			}
+			fmt.Printf("  %s: retry login... ", acc.Name)
+			if err := clients[acc.Email].Login(acc.Email, acc.Password); err != nil {
+				notify(fmt.Sprintf("Court bot warn: pre-fire login failed for %s - %v (trying book anyway)", acc.Name, err))
+				fmt.Fprintf(os.Stderr, "WARN pre-fire login %s: %v — proceeding to book anyway\n", acc.Name, err)
+			} else {
+				fmt.Println("OK")
+			}
+		}
+	}
 
 	// Step 3: Book slots for each unit (schedule × account)
 	fmt.Println("[3/3] Booking target slots...")
