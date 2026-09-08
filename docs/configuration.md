@@ -43,9 +43,14 @@ fall back to legacy. Each schedule is independent: own
 `target_day`, `booking_plan` (same `slot>courts;...` syntax, slots validated
 as `HH:MM-HH:MM`), and `accounts`
 (`[all]` or `GPROP_ACCOUNT_N_NAME` values, never mixed). Schedule names are slugs
-`[a-z0-9-]` for `--schedule` and cron. The schedule's plan wins; the
+`[a-z0-9-]` for `--schedule`. The schedule's plan wins; the
 account's own plan is ignored in schedule mode. No file = legacy
 `GPROP_TARGET_DAY` + booking-plan path, unchanged.
+
+Cron is daily (`0 0 * * *`); the file is the DB — `run` skips schedules whose
+`target_day` doesn't match `today+7`. Manage by editing the file or
+`/setday <schedule> <day>` (Telegram edits the file atomically, no crontab
+change). Manual `--schedule` filter is for testing only.
 
 ## Web UI
 
