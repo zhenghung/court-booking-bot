@@ -420,10 +420,19 @@ func cmdRun() {
 	var skipped []string
 	useSchedules := len(cfg.Schedules) > 0
 
-	// Calculate target date: today + 7 days (the date that opens at next midnight)
+	// Calculate target date: the date that opens at next midnight.
+	// At 59 23 daily, today+7 (Thu) != midnight+7 (Fri) — use midnight+7 for poll path.
 	today := klNow()
-	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
-	targetDateParsed, _ := time.Parse("2006-01-02", targetDate)
+	midnightForTarget := time.Date(today.Year(), today.Month(), today.Day()+1, 0, 0, 0, 0, today.Location())
+	var targetDate string
+	var targetDateParsed time.Time
+	if *now {
+		targetDate = today.AddDate(0, 0, 7).Format("2006-01-02")
+		targetDateParsed, _ = time.Parse("2006-01-02", targetDate)
+	} else {
+		targetDate = midnightForTarget.AddDate(0, 0, 7).Format("2006-01-02")
+		targetDateParsed, _ = time.Parse("2006-01-02", targetDate)
+	}
 
 	if useSchedules {
 		selected, err := config.SelectSchedules(cfg.Schedules, []string(scheduleNames))
@@ -579,7 +588,7 @@ func cmdRun() {
 	var fireTime time.Time
 	var midnight time.Time
 	if !*now {
-		midnight = time.Date(today.Year(), today.Month(), today.Day()+1, 0, 0, 0, 0, today.Location())
+		midnight = midnightForTarget
 		waitDuration := time.Until(midnight)
 
 		// Re-login at 23:59:30 if more than 60s away
