@@ -88,7 +88,7 @@ sequenceDiagram
 
 ## 5. run (midnight snipe)
 
-Cron: `0 0 * * * GPROP_SCHEDULES_FILE=... ./court-bot run --now` daily file-DB. Target date = today+7d. Skips schedules whose `target_day` ≠ target weekday (log-only, no Telegram spam). `--now` skips wait. `--schedule NAME` filter is for manual testing only.
+Cron: `59 23 * * * GPROP_SCHEDULES_FILE=... ./court-bot run` daily file-DB. Target date = today+7d (KL). Skips schedules whose `target_day` ≠ target weekday (log-only). Poll 500ms from 23:59:55 to 00:00:30, re-login at 23:59:30. `--now` skips wait (manual testing only). `--schedule NAME` filter is for manual testing only.
 
 ```mermaid
 sequenceDiagram

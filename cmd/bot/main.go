@@ -68,6 +68,13 @@ func printUsage() {
 	fmt.Println("Run 'court-bot <command> --help' for command flags.")
 }
 
+func klNow() time.Time {
+	if kl, err := time.LoadLocation("Asia/Kuala_Lumpur"); err == nil {
+		return time.Now().In(kl)
+	}
+	return time.Now().In(time.FixedZone("MYT", 8*3600))
+}
+
 // scheduleFlag collects repeatable --schedule values.
 type scheduleFlag []string
 
@@ -177,7 +184,7 @@ func cmdProbe() {
 
 	targetDate := *date
 	if targetDate == "" {
-		targetDate = time.Now().AddDate(0, 0, 7).Format("2006-01-02")
+		targetDate = klNow().AddDate(0, 0, 7).Format("2006-01-02")
 	}
 
 	fmt.Printf("Courts:   %v\n", facilityIDs)
@@ -288,7 +295,7 @@ func cmdBook() {
 
 	targetDate := *date
 	if targetDate == "" {
-		targetDate = time.Now().AddDate(0, 0, 7).Format("2006-01-02")
+		targetDate = klNow().AddDate(0, 0, 7).Format("2006-01-02")
 	}
 
 	fmt.Printf("Courts:   %v\n", facilityIDs)
@@ -414,7 +421,7 @@ func cmdRun() {
 	useSchedules := len(cfg.Schedules) > 0
 
 	// Calculate target date: today + 7 days (the date that opens at next midnight)
-	today := time.Now()
+	today := klNow()
 	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
 	targetDateParsed, _ := time.Parse("2006-01-02", targetDate)
 
@@ -595,15 +602,15 @@ func cmdRun() {
 
 		// Poll loop from 23:59:55 until slot available or 00:00:30
 		pollStart := time.Date(today.Year(), today.Month(), today.Day()+1, 0, 0, -5, 0, today.Location()) // 23:59:55
-		if time.Now().Before(pollStart) {
+		if klNow().Before(pollStart) {
 			remaining := time.Until(pollStart)
 			fmt.Printf("  Waiting for poll window %s (%s)...\n", pollStart.Format("15:04:05"), remaining.Round(time.Second))
 			time.Sleep(remaining)
 		}
 
-		fmt.Println("  Polling for slot availability every 200ms...")
+		fmt.Println("  Polling for slot availability every 500ms...")
 		consecutiveErrors := 0
-		ticker := time.NewTicker(200 * time.Millisecond)
+		ticker := time.NewTicker(500 * time.Millisecond)
 
 		// Poll primary facility first (fast check) — resolve once before loop
 		primaryCourt := "" // first court of first unit's first plan entry
@@ -630,7 +637,7 @@ func cmdRun() {
 		pollTimeout := midnight.Add(30 * time.Second)
 		for range ticker.C {
 			pollAttempts++
-			if time.Now().After(pollTimeout) {
+			if klNow().After(pollTimeout) {
 				fmt.Println("  Poll timeout 00:00:30, proceeding to book anyway")
 				break
 			}
@@ -659,9 +666,9 @@ func cmdRun() {
 					break
 				}
 			}
-			fmt.Printf("  Poll %d %s: %s available=%v\n", pollAttempts, time.Now().Format("15:04:05.000"), targetSlot, available)
+			fmt.Printf("  Poll %d %s: %s available=%v\n", pollAttempts, klNow().Format("15:04:05.000"), targetSlot, available)
 			if available {
-				fireTime = time.Now()
+				fireTime = klNow()
 				fmt.Printf("  Slot flipped available at %s after %d polls!\n", fireTime.Format("15:04:05.000"), pollAttempts)
 				break
 			}
@@ -676,7 +683,7 @@ func cmdRun() {
 				fmt.Printf("  Final wait: %s\n", remaining.Round(time.Millisecond))
 				time.Sleep(remaining)
 			}
-			fireTime = time.Now()
+			fireTime = klNow()
 			fmt.Printf("  MIDNIGHT! %s (polls=%d)\n", fireTime.Format("15:04:05.000"), pollAttempts)
 		} else if fireTime.Before(midnight) {
 			remaining := time.Until(midnight)
@@ -684,7 +691,7 @@ func cmdRun() {
 			if remaining > 0 {
 				time.Sleep(remaining)
 			}
-			fireTime = time.Now()
+			fireTime = klNow()
 			fmt.Printf("  MIDNIGHT! %s (polls=%d)\n", fireTime.Format("15:04:05.000"), pollAttempts)
 		} else {
 			fmt.Printf("  Fire at %s (polls=%d, %s after midnight)\n", fireTime.Format("15:04:05.000"), pollAttempts, time.Since(midnight).Round(time.Millisecond))
@@ -789,7 +796,7 @@ func cmdRun() {
 	fireStr := fireTime.Format("15:04:05.000")
 	fireDelayStr := "0s"
 	if fireTime.IsZero() {
-		fireStr = time.Now().Format("15:04:05.000")
+		fireStr = klNow().Format("15:04:05.000")
 		if !midnight.IsZero() {
 			fireDelayStr = time.Since(midnight).Round(time.Millisecond).String()
 		}
@@ -984,7 +991,7 @@ type TelegramUser struct {
 
 func handleStatusCommand(cfg *config.Config) {
 	// Schedule-aware status: daily file-DB cron is the source.
-	today := time.Now()
+	today := klNow()
 	targetDate := today.AddDate(0, 0, 7).Format("2006-01-02")
 	targetDateParsed, _ := time.Parse("2006-01-02", targetDate)
 	if len(cfg.Schedules) > 0 {
@@ -1013,7 +1020,7 @@ func handleStatusCommand(cfg *config.Config) {
 				lines += fmt.Sprintf("\n     • %s → %v", e.Slot, e.Courts)
 			}
 		}
-		cronDesc := "daily 00:00 MYT (file-DB gated)"
+		cronDesc := "daily 23:59 MYT (file-DB gated, 500ms poll)"
 		if cfg.ScheduleFile != "" {
 			cronDesc += " — " + cfg.ScheduleFile
 		}

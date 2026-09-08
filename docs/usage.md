@@ -9,7 +9,8 @@ Purpose: every CLI and Telegram command in one place. Audience: humans.
 | `./court-bot ping` | Test HTTP connectivity to gpropsystems |
 | `./court-bot probe --date 2026-03-06` | Check court availability for a date |
 | `./court-bot book --time 07:00-08:00` | Book a specific timeslot |
-| `./court-bot run --now --dry-run` | Test scheduler without booking |
+| `./court-bot run --dry-run` | Test scheduler without booking (poll still runs at 23:59:55) |
+| `./court-bot run --now --dry-run` | Test scheduler immediately (skip midnight wait) |
 | `./court-bot bot` | Run Telegram bot daemon |
 | `./court-bot facilities` | List all available courts with IDs and names |
 | `./court-bot health-check` | Test login functionality and alert on failure |
