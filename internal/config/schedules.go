@@ -217,6 +217,48 @@ func ScheduleCourts(s Schedule) []string {
 	return out
 }
 
+// UpdateScheduleDay atomically changes one schedule's target_day in the YAML file.
+func UpdateScheduleDay(path, name, newDay string) error {
+	day := strings.ToLower(strings.TrimSpace(newDay))
+	if !validDays[day] {
+		return fmt.Errorf("invalid target_day %q", newDay)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read schedules file: %w", err)
+	}
+	var raw schedulesFile
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("parse schedules file %s: %w", path, err)
+	}
+	found := false
+	for i := range raw.Schedules {
+		if strings.TrimSpace(raw.Schedules[i].Name) == name {
+			raw.Schedules[i].TargetDay = day
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("unknown schedule %q", name)
+	}
+	out, err := yaml.Marshal(&raw)
+	if err != nil {
+		return fmt.Errorf("marshal schedules file: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
+		return err
+	}
+	// Validate YAML parses before swap
+	var check schedulesFile
+	if err := yaml.Unmarshal(out, &check); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("validate schedules file: %w", err)
+	}
+	return os.Rename(tmp, path)
+}
+
 // resolveScheduleFilePath returns the schedules file to load, or "" if none exists.
 // Order: GPROP_SCHEDULES_FILE -> ./schedules.yaml -> ~/.schedules.yaml.
 func resolveScheduleFilePath(explicit string) string {

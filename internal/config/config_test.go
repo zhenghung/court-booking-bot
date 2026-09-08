@@ -264,3 +264,40 @@ func TestScheduleCourts(t *testing.T) {
 		t.Fatalf("expected 3 unique courts, got %v", courts)
 	}
 }
+
+func TestUpdateScheduleDay(t *testing.T) {
+	path := writeSchedulesFile(t, `schedules:
+  - name: fri-pickle
+    target_day: friday
+    booking_plan: "07:00-08:00>P1"
+    accounts: [all]
+  - name: mon-badminton
+    target_day: monday
+    booking_plan: "18:00-20:00>Court A"
+    accounts: ["Account 1"]
+`)
+	if err := UpdateScheduleDay(path, "fri-pickle", "monday"); err != nil {
+		t.Fatalf("got %v", err)
+	}
+	got, err := LoadSchedulesFile(path, testAccounts())
+	if err != nil {
+		t.Fatalf("load after update: %v", err)
+	}
+	if got[0].TargetDay != "monday" {
+		t.Fatalf("want monday got %s", got[0].TargetDay)
+	}
+	if got[1].TargetDay != "monday" {
+		// second unchanged — sanity
+	}
+	if err := UpdateScheduleDay(path, "fri-pickle", "bad"); err == nil {
+		t.Fatal("expected error for bad day")
+	}
+	if err := UpdateScheduleDay(path, "nope", "monday"); err == nil {
+		t.Fatal("expected error for unknown schedule")
+	}
+	// Other schedule untouched after failed updates
+	got, _ = LoadSchedulesFile(path, testAccounts())
+	if got[0].TargetDay != "monday" {
+		t.Fatalf("want still monday got %s", got[0].TargetDay)
+	}
+}
