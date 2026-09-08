@@ -88,7 +88,7 @@ sequenceDiagram
 
 ## 5. run (midnight snipe)
 
-Cron: `0 0 * * 5 ./court-bot run --now`. Target date = today+7d. `--now` skips wait.
+Cron: `0 0 * * * GPROP_SCHEDULES_FILE=... ./court-bot run --now` daily file-DB. Target date = today+7d. Skips schedules whose `target_day` ≠ target weekday (log-only, no Telegram spam). `--now` skips wait. `--schedule NAME` filter is for manual testing only.
 
 ```mermaid
 sequenceDiagram
@@ -147,10 +147,9 @@ sequenceDiagram
     alt /status
         CLI->>CLI: Load config, compute next run
         CLI->>TG: sendMessage status + booking plan
-    else /setday monday
-        CLI->>CLI: setEnvKey ~/.env GPROP_TARGET_DAY
-        CLI->>CLI: crontab -l rewrite scheduler line, crontab -
-        CLI->>TG: sendMessage updated day + cron line
+    else /setday fri-pickle monday (file-DB) or /setday monday (legacy)
+        CLI->>CLI: UpdateScheduleDay ~/.schedules.yaml or setEnvKey ~/.env
+        CLI->>TG: sendMessage updated day (daily cron unchanged in file-DB)
     else /bookings
         CLI->>Gprop: Login per account + GET booking_listing
         Gprop-->>CLI: aaData bookings

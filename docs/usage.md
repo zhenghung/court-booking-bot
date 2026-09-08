@@ -40,7 +40,7 @@ snipe night — cron owns that window.
 
 | Command | Description |
 |---------|-------------|
-| `/status` | Check bot config, next run time, booking plan |
-| `/setday <day>` | Update booking day and cron day (e.g. `/setday monday`) |
+| `/status` | Check bot config, next run per schedule, booking plan (file-DB when present) |
+| `/setday <schedule> <day>` | Update schedule's target day in file-DB (e.g. `/setday fri-pickle monday`); legacy `/setday <day>` when no schedules file |
 | `/bookings` | Show upcoming bookings from today onwards |
 | `/help` | Show help message |
