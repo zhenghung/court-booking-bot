@@ -23,6 +23,7 @@ type StatusPayload struct {
 	TargetDay   string         `json:"targetDay"`
 	TargetDate  string         `json:"targetDate"`
 	NextRun     string         `json:"nextRun,omitempty"`
+	NextRunAt   string         `json:"nextRunAt,omitempty"`
 	Accounts    []AccountView  `json:"accounts"`
 	BookingPlan []string       `json:"bookingPlan,omitempty"`
 	Schedules   []ScheduleView `json:"schedules,omitempty"`
@@ -39,6 +40,7 @@ type ScheduleView struct {
 	BookingPlan []ScheduleEntry `json:"bookingPlan"`
 	Accounts    []string        `json:"accounts"`
 	NextRun     string          `json:"nextRun,omitempty"`
+	NextRunAt   string          `json:"nextRunAt,omitempty"`
 	Courts      []string        `json:"courts,omitempty"`
 }
 
