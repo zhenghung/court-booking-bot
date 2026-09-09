@@ -19,6 +19,11 @@ import (
 	"github.com/zhenghung/court-booking-bot/internal/web"
 )
 
+// dateRangeRetryWindow bounds how long after midnight the snipe keeps resubmitting
+// a date-range-rejected court while the +7 date rolls into gpropsystems' allowed
+// booking window (observed to open a moment after 00:00, not at 00:00:00.000).
+const dateRangeRetryWindow = 3 * time.Minute
+
 func main() {
 	fmt.Println("=== Court Booking Bot ===")
 	fmt.Println()
@@ -784,16 +789,37 @@ func cmdRun() {
 						continue
 					}
 
+					if !result.Status && api.IsDateRangeRejected(result) {
+						// The +7 date only rolls into the allowed booking window just
+						// after midnight; a fire at 00:00:00.000 can land a moment
+						// early. Keep resubmitting on a short cadence until it opens.
+						var deadline time.Time
+						if !midnight.IsZero() {
+							deadline = midnight.Add(dateRangeRetryWindow)
+						}
+						if !deadline.IsZero() {
+							fmt.Printf("    Court %s: date not in window yet, retrying until %s...\n", fid, deadline.Format("15:04:05"))
+							result, err = api.RetryDateRangeRejection(func() (*api.BookingResult, error) {
+								return client.BookSlot(fid, acc.UnitID, acc.BookingName, acc.Contact, targetDate, entry.Slot)
+							}, deadline, klNow, time.Sleep)
+							if err != nil {
+								lastErr = err
+								fmt.Printf("    Court %s: date-range retry ERROR %v\n", fid, err)
+								continue
+							}
+						}
+					}
+
 					if result.Status {
 						fmt.Printf("    Court %s: SUCCESS — %s (ID: %d)\n", fid, result.Msg, result.InsertID)
 						booked = true
 						successCount++
 						break
-					} else {
-						fmt.Printf("    Court %s: REJECTED — %s\n", fid, result.Msg)
-						lastErr = fmt.Errorf("%s", result.Msg)
-						break // Don't retry on server rejection, try next court
 					}
+
+					fmt.Printf("    Court %s: REJECTED — %s\n", fid, result.Msg)
+					lastErr = fmt.Errorf("%s", result.Msg)
+					break // Don't retry on server rejection, try next court
 				}
 
 				if booked {
