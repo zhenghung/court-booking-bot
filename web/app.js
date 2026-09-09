@@ -42,17 +42,73 @@ async function loadStatus() {
   const box = document.getElementById("statusBox");
   try {
     const s = await api("/api/status");
-    document.getElementById("targetLine").textContent = `Target ${s.targetDay || ""} · ${s.targetDate || ""}`;
-    let html = `<p>Target day: <strong>${esc(s.targetDay) || "—"}</strong></p>
-      <p>Target date: <strong>${esc(s.targetDate) || "—"}</strong></p>
-      <p>Next run: <strong>${esc(s.nextRun) || "—"}</strong></p>`;
-    if (s.schedules && s.schedules.length) {
-      html += `<h3>Schedules</h3><ul>${s.schedules.map(v => `<li><strong>${esc(v.name)}</strong> · ${esc(v.targetDay)} · ${esc(v.nextRun || "")} · ${(v.bookingPlan||[]).map(p=>esc(p.slot)).join(", ") || "—"}</li>`).join("")}</ul>`;
+    const hasSchedules = s.schedules && s.schedules.length;
+    if (hasSchedules) {
+      // Backend already sorts by nextRun and promotes hero to top-level.
+      const hero = s.schedules[0];
+      const heroAt = hero.nextRunAt || s.nextRunAt;
+      document.getElementById("targetLine").textContent = `Next: ${hero.name} — ${hero.targetDay} · ${hero.nextRun || s.nextRun || ""}`;
+      // Count same-night tie
+      let tieCount = 0;
+      if (heroAt) {
+        const heroDay = new Date(heroAt).toISOString().slice(0,10);
+        for (let i=1;i<s.schedules.length;i++) {
+          const at = s.schedules[i].nextRunAt;
+          if (at && new Date(at).toISOString().slice(0,10) === heroDay) tieCount++;
+        }
+      }
+      let html = `<div class="runway-intro"><p class="hint">Cron daily 23:59 MYT — file-DB gated · ${s.schedules.length} schedules · Next booking date ${esc(s.targetDate || "—")} (${esc(s.targetDay || "—")})</p>`;
+      if (tieCount) html += `<p class="hint">+${tieCount} more fire${tieCount>1?"s":""} same night as ${esc(hero.name)}</p>`;
+      html += `</div>`;
+      html += `<div class="runway">`;
+      for (let idx=0; idx<s.schedules.length; idx++) {
+        const v = s.schedules[idx];
+        const isHero = idx===0;
+        const slots = (v.bookingPlan||[]).map(p=>esc(p.slot)).join(", ") || "—";
+        const courts = (v.bookingPlan||[]).flatMap(p=>p.courts||[]).join(", ") || "—";
+        html += `<div class="runway-lane${isHero?" hero":""}">`
+          + `<div class="runway-head"><span class="runway-name">${esc(v.name)}</span> <span class="sched-day">${esc(v.targetDay)}</span>${isHero?` <span class="runway-badge">FIRES NEXT</span>`:""}`
+          + ` <span class="runway-next">${esc(v.nextRun || "")}</span></div>`
+          + `<div class="runway-meta">${esc((v.accounts||[]).join(", "))} · ${slots} → ${esc(courts)}</div>`
+          + `</div>`;
+      }
+      html += `</div>`;
+      html += `<h3>Accounts</h3><ul>${(s.accounts || []).map(a => `<li>${esc(a.name)}</li>`).join("")}</ul>`;
+      box.innerHTML = html;
+      // Countdown to hero midnight, not +7 targetDate
+      if (heroAt) startCountdownAt(heroAt);
+      else if (hero.nextRun) startCountdown(s.targetDate);
+      else startCountdown(s.targetDate);
+    } else {
+      document.getElementById("targetLine").textContent = `Target ${s.targetDay || ""} · ${s.targetDate || ""}`;
+      let html = `<p>Target day: <strong>${esc(s.targetDay) || "—"}</strong></p>
+        <p>Target date: <strong>${esc(s.targetDate) || "—"}</strong></p>
+        <p>Next run: <strong>${esc(s.nextRun) || "—"}</strong></p>`;
+      html += `<h3>Accounts</h3><ul>${(s.accounts || []).map(a => `<li>${esc(a.name)}</li>`).join("")}</ul>`;
+      box.innerHTML = html;
+      if (s.nextRunAt) startCountdownAt(s.nextRunAt);
+      else startCountdown(s.targetDate);
     }
-    html += `<h3>Accounts</h3><ul>${(s.accounts || []).map(a => `<li>${esc(a.name)}</li>`).join("")}</ul>`;
-    box.innerHTML = html;
-    startCountdown(s.targetDate);
   } catch (e) { box.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+}
+
+function startCountdownAt(iso) {
+  const el = document.getElementById("countdown");
+  if (!iso) { el.textContent = "—"; return; }
+  const midnight = new Date(iso).getTime();
+  if (isNaN(midnight)) { el.textContent = "—"; return; }
+  function tick() {
+    const ms = midnight - Date.now();
+    if (ms <= 0) { el.textContent = "window open"; clearInterval(startCountdownAt.t); return; }
+    const h = Math.floor(ms / 3600000), m = Math.floor(ms % 3600000 / 60000), s2 = Math.floor(ms % 60000 / 1000);
+    const d = Math.floor(h/24);
+    if (d > 0) el.textContent = `fires in ${d}d ${String(h%24).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s2).padStart(2,"0")}`;
+    else el.textContent = `fires in ${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s2).padStart(2,"0")}`;
+  }
+  tick();
+  clearInterval(startCountdownAt.t);
+  clearInterval(startCountdown.t);
+  startCountdownAt.t = setInterval(tick, 1000);
 }
 
 function startCountdown(targetDate) {
@@ -65,6 +121,7 @@ function startCountdown(targetDate) {
     if (ms <= 0) {
       el.textContent = "window open";
       clearInterval(startCountdown.t);
+      clearInterval(startCountdownAt.t);
       return;
     }
     const h = Math.floor(ms / 3600000), m = Math.floor(ms % 3600000 / 60000), s2 = Math.floor(ms % 60000 / 1000);
@@ -72,6 +129,7 @@ function startCountdown(targetDate) {
   }
   tick();
   clearInterval(startCountdown.t);
+  clearInterval(startCountdownAt.t);
   startCountdown.t = setInterval(tick, 1000);
 }
 

@@ -50,10 +50,48 @@ func (b *LiveBackend) Status() StatusPayload {
 	for _, s := range schedules {
 		sv = append(sv, scheduleToView(s, now))
 	}
+	// In file-DB mode, sort schedules by next fire and promote earliest to header.
+	if len(sv) > 0 {
+		earliestIdx := 0
+		earliestTime := nextRunTime(now, sv[0].TargetDay)
+		for i := 1; i < len(sv); i++ {
+			t := nextRunTime(now, sv[i].TargetDay)
+			if !t.IsZero() && (earliestTime.IsZero() || t.Before(earliestTime)) {
+				earliestTime = t
+				earliestIdx = i
+			}
+		}
+		if !earliestTime.IsZero() {
+			hero := sv[earliestIdx]
+			// Stable sort by nextRunTime for runway display.
+			sorted := make([]ScheduleView, len(sv))
+			copy(sorted, sv)
+			// Insertion sort (n small, avoid import sort for minimal diff).
+			for i := 1; i < len(sorted); i++ {
+				j := i
+				for j > 0 && nextRunTime(now, sorted[j].TargetDay).Before(nextRunTime(now, sorted[j-1].TargetDay)) {
+					sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+					j--
+				}
+			}
+			sv = sorted
+			heroTime := nextRunTime(now, hero.TargetDay)
+			return StatusPayload{
+				TargetDay:   titleDay(hero.TargetDay),
+				TargetDate:  heroTime.AddDate(0, 0, 7).Format("2006-01-02"),
+				NextRun:     hero.NextRun,
+				NextRunAt:   hero.NextRunAt,
+				Accounts:    accounts,
+				BookingPlan: plan,
+				Schedules:   sv,
+			}
+		}
+	}
 	return StatusPayload{
 		TargetDay:   titleDay(b.cfg.TargetDay),
 		TargetDate:  targetDate,
 		NextRun:     nextRun(now, b.cfg.TargetDay),
+		NextRunAt:   nextRunTime(now, b.cfg.TargetDay).Format(time.RFC3339),
 		Accounts:    accounts,
 		BookingPlan: plan,
 		Schedules:   sv,
@@ -73,12 +111,18 @@ func scheduleToView(s config.Schedule, now time.Time) ScheduleView {
 			}
 		}
 	}
+	t := nextRunTime(now, s.TargetDay)
+	nextRunAt := ""
+	if !t.IsZero() {
+		nextRunAt = t.Format(time.RFC3339)
+	}
 	return ScheduleView{
 		Name:        s.Name,
 		TargetDay:   s.TargetDay,
 		BookingPlan: plan,
 		Accounts:    append([]string{}, s.AccountNames...),
 		NextRun:     nextRun(now, s.TargetDay),
+		NextRunAt:   nextRunAt,
 		Courts:      courts,
 	}
 }
@@ -89,6 +133,14 @@ func (b *LiveBackend) Schedules() (SchedulesPayload, error) {
 	now := klNow()
 	for _, s := range schedules {
 		sv = append(sv, scheduleToView(s, now))
+	}
+	// Sort by nextRunTime for stable UI ordering.
+	for i := 1; i < len(sv); i++ {
+		j := i
+		for j > 0 && nextRunTime(now, sv[j].TargetDay).Before(nextRunTime(now, sv[j-1].TargetDay)) {
+			sv[j], sv[j-1] = sv[j-1], sv[j]
+			j--
+		}
 	}
 	var accNames []string
 	for _, a := range b.cfg.Accounts {
@@ -216,9 +268,8 @@ func (b *LiveBackend) DeleteSchedule(name string) error {
 	return nil
 }
 
-// nextRun returns the next midnight (KL) whose weekday matches targetDay,
-// mirroring the cron snipe schedule. Empty string if day unparseable.
-func nextRun(now time.Time, targetDay string) string {
+// nextRunTime returns the next midnight (KL) whose weekday matches targetDay.
+func nextRunTime(now time.Time, targetDay string) time.Time {
 	days := map[string]time.Weekday{
 		"sunday": time.Sunday, "sun": time.Sunday,
 		"monday": time.Monday, "mon": time.Monday,
@@ -230,7 +281,7 @@ func nextRun(now time.Time, targetDay string) string {
 	}
 	want, ok := days[strings.ToLower(strings.TrimSpace(targetDay))]
 	if !ok {
-		return ""
+		return time.Time{}
 	}
 	d := now
 	for d.Weekday() != want {
@@ -240,7 +291,17 @@ func nextRun(now time.Time, targetDay string) string {
 	if midnight.Before(now) {
 		midnight = midnight.AddDate(0, 0, 7)
 	}
-	return midnight.Format("Mon Jan 2, 15:04")
+	return midnight
+}
+
+// nextRun returns the next midnight (KL) whose weekday matches targetDay,
+// mirroring the cron snipe schedule. Empty string if day unparseable.
+func nextRun(now time.Time, targetDay string) string {
+	t := nextRunTime(now, targetDay)
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("Mon Jan 2, 15:04")
 }
 
 func join(ss []string, sep string) string {

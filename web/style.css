@@ -115,6 +115,16 @@ table.sheet th, table.sheet td {
 .court-add { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; align-items:center; }
 .court-add select { flex:1; min-width:180px; }
 .editor-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.runway { display:flex; flex-direction:column; gap:8px; margin:12px 0; }
+.runway-intro { margin-bottom:4px; }
+.runway-lane { border:1px solid #E4DECB; border-radius:6px; padding:10px 12px; background:#fff; }
+.runway-lane.hero { border-left:4px solid var(--pickle); background:#FFF; box-shadow:0 1px 6px rgba(22,35,63,.08); }
+.runway-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-variant-numeric: tabular-nums; }
+.runway-name { font-weight:700; font-size:14px; }
+.runway-badge { display:inline-block; background:var(--pickle); color:var(--ink); border:1px solid var(--pickle-dark); border-radius:10px; padding:1px 7px; font-size:11px; font-weight:700; letter-spacing:0.02em; }
+.runway-next { font-size:13px; color:#5c5747; font-variant-numeric: tabular-nums; }
+.runway-meta { font-size:13px; color:#5c5747; margin-top:4px; font-variant-numeric: tabular-nums; }
+
 @media (max-width: 900px) {
   .sched-layout { grid-template-columns: 1fr; }
   .sheet-wrap { overflow-x: auto; }
