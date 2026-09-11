@@ -7,15 +7,15 @@ Purpose: deploy and schedule the bot on Oracle Cloud. Audience: humans.
 - Host: `ubuntu@149.118.140.17`
 - Platform: Oracle Cloud Free Tier ARM64 (Ubuntu 22.04)
 - Timezone: Asia/Kuala_Lumpur (UTC+8)
-- SSH key: `ssh-key-*.key` in project root (gitignored)
+- SSH key: `~/.ssh/oracle-box.key` (0600, never in repo — see `box-ops/secrets/ssh-keys.md`)
 
 ## Deploy
 
 ```bash
 GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot
-scp -i ssh-key-*.key court-bot-linux-arm64 ubuntu@149.118.140.17:/home/ubuntu/court-bot.new
-ssh -i ssh-key-*.key ubuntu@149.118.140.17 "mv ~/court-bot.new ~/court-bot && chmod +x ~/court-bot && ./court-bot ping"
-ssh -i ssh-key-*.key ubuntu@149.118.140.17 "cd ~ && ./court-bot run --now --dry-run"
+scp -i ~/.ssh/oracle-box.key court-bot-linux-arm64 ubuntu@149.118.140.17:/home/ubuntu/court-bot.new
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "mv ~/court-bot.new ~/court-bot && chmod +x ~/court-bot && ./court-bot ping"
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "cd ~ && ./court-bot run --now --dry-run"
 ```
 
 Deploy via rename (`court-bot.new` → `court-bot`): direct `scp` onto the
@@ -26,8 +26,8 @@ cron-spawned commands.
 ## Schedules file
 
 ```bash
-scp -i ssh-key-*.key schedules.yaml ubuntu@149.118.140.17:/home/ubuntu/.schedules.yaml
-ssh -i ssh-key-*.key ubuntu@149.118.140.17 "cd ~ && GPROP_SCHEDULES_FILE=/home/ubuntu/.schedules.yaml ./court-bot run --list-schedules"
+scp -i ~/.ssh/oracle-box.key schedules.yaml ubuntu@149.118.140.17:/home/ubuntu/.schedules.yaml
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "cd ~ && GPROP_SCHEDULES_FILE=/home/ubuntu/.schedules.yaml ./court-bot run --list-schedules"
 ```
 
 Cron passes `GPROP_SCHEDULES_FILE` inline (absolute path — never rely on
@@ -67,8 +67,8 @@ the manual-daemon reboot gap) — the box has no git checkout, so ship the
 unit file first:
 
 ```bash
-scp -i ssh-key-*.key deploy/court-serve.service ubuntu@149.118.140.17:/tmp/court-serve.service
-ssh -i ssh-key-*.key ubuntu@149.118.140.17 "sudo cp /tmp/court-serve.service /etc/systemd/system/court-serve.service"
+scp -i ~/.ssh/oracle-box.key deploy/court-serve.service ubuntu@149.118.140.17:/tmp/court-serve.service
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "sudo cp /tmp/court-serve.service /etc/systemd/system/court-serve.service"
 sudo systemctl daemon-reload
 sudo systemctl enable --now court-serve
 systemctl is-active court-serve
