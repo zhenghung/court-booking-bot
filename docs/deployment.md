@@ -48,17 +48,28 @@ schedules `/home/ubuntu/.schedules.yaml`, logs `/home/ubuntu/court-bot.log`.
 Cohost note: the VM also runs bank-dashboard (own processes, own cron
 line). Edit crontab surgically — only court lines, never a full rewrite.
 
-## Web UI
+## Web UI (behind Caddy HTTPS)
 
-Set `UI_PASSWORD` in server `.env` (long random value, 16+ chars), open Oracle ingress for
-the UI port (`UI_PORT`, default 8080), then run as a daemon:
+The UI is served via Caddy (`https://court.149-118-140-17.sslip.io` →
+`127.0.0.1:8080`). Never expose `:8080` directly (no Oracle ingress rule,
+no iptables rule). `UI_BIND=127.0.0.1` in server `.env` enforces loopback-only.
+
+Install as a systemd unit (fixes the manual-daemon reboot gap):
 
 ```bash
-./court-bot serve >> /home/ubuntu/court-bot.log 2>&1 &
+sudo cp deploy/court-serve.service /etc/systemd/system/court-serve.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now court-serve
+systemctl is-active court-serve
+ss -tlnp | grep 8080  # expect 127.0.0.1:8080 only
 ```
 
-(Serve reads `UI_*` from the server `.env` — never pass the password on the
-command line; it leaks via shell history and `ps`.)
+Set `UI_PASSWORD` in server `.env` (long random value, 16+ chars, never on the
+command line — it leaks via shell history and `ps`).
+
+Caddy trusts `X-Forwarded-For` only from loopback (`internal/web/server.go`):
+rate-limiting sees real client IPs through the proxy, WAN-spoofed headers
+are ignored.
 
 See [usage](usage.md) for the console tour and [configuration](configuration.md)
 for `UI_*` vars.
