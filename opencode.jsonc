@@ -2,9 +2,8 @@
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "bash": {
-      "git push origin main": "deny",
-      "git push -u origin main": "deny",
-      "git push origin HEAD:main": "deny"
+      "git push*main*": "deny",
+      "gh pr merge*": "deny"
     }
   }
 }
