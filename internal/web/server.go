@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -207,8 +208,12 @@ func clientIP(r *http.Request) string {
 	// Trust X-Forwarded-For only from loopback (Caddy sets it); WAN-sent XFF
 	// stays spoofable and is ignored.
 	host := r.RemoteAddr
-	if i := strings.LastIndex(host, ":"); i >= 0 {
-		host = host[:i]
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	} else if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = strings.Trim(host[:i], "[]")
+	} else {
+		host = strings.Trim(host, "[]")
 	}
 	if host == "127.0.0.1" || host == "::1" {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {

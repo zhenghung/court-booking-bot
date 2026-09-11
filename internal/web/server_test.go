@@ -210,6 +210,15 @@ func TestClientIPIgnoresSpoofedForwardedFromWAN(t *testing.T) {
 	}
 }
 
+func TestClientIPTrustsForwardedFromIPv6Loopback(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"nope"}`))
+	r.RemoteAddr = "[::1]:1234"
+	r.Header.Set("X-Forwarded-For", "9.9.9.9")
+	if got := clientIP(r); got != "9.9.9.9" {
+		t.Fatalf("::1 + XFF = %q, want 9.9.9.9", got)
+	}
+}
+
 func TestLoginWrongPassword(t *testing.T) {
 	s := newTestServer()
 	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"nope"}`))
