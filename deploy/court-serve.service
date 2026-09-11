@@ -1,0 +1,16 @@
+[Unit]
+Description=court-bot web UI (behind Caddy HTTPS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+EnvironmentFile=/home/ubuntu/.env
+ExecStart=/home/ubuntu/court-bot serve
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

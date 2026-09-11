@@ -192,6 +192,33 @@ func TestBookRejectsBadTime(t *testing.T) {
 	}
 }
 
+func TestClientIPTrustsForwardedFromLoopback(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"nope"}`))
+	r.RemoteAddr = "127.0.0.1:1234"
+	r.Header.Set("X-Forwarded-For", "9.9.9.9")
+	if got := clientIP(r); got != "9.9.9.9" {
+		t.Fatalf("loopback + XFF = %q, want 9.9.9.9", got)
+	}
+}
+
+func TestClientIPIgnoresSpoofedForwardedFromWAN(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"nope"}`))
+	r.RemoteAddr = "1.2.3.4:1234"
+	r.Header.Set("X-Forwarded-For", "9.9.9.9")
+	if got := clientIP(r); got != "1.2.3.4" {
+		t.Fatalf("wan + spoofed XFF = %q, want 1.2.3.4", got)
+	}
+}
+
+func TestClientIPTrustsForwardedFromIPv6Loopback(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"nope"}`))
+	r.RemoteAddr = "[::1]:1234"
+	r.Header.Set("X-Forwarded-For", "9.9.9.9")
+	if got := clientIP(r); got != "9.9.9.9" {
+		t.Fatalf("::1 + XFF = %q, want 9.9.9.9", got)
+	}
+}
+
 func TestLoginWrongPassword(t *testing.T) {
 	s := newTestServer()
 	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"nope"}`))

@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -203,10 +204,25 @@ func randomToken(n int) (string, error) {
 }
 
 func clientIP(r *http.Request) string {
-	// RemoteAddr only — no trusted proxy in front, so X-Forwarded-For is spoofable.
+	// Behind Caddy reverse_proxy on 127.0.0.1, RemoteAddr is always loopback.
+	// Trust X-Forwarded-For only from loopback (Caddy sets it); WAN-sent XFF
+	// stays spoofable and is ignored.
 	host := r.RemoteAddr
-	if i := strings.LastIndex(host, ":"); i >= 0 {
-		return host[:i]
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	} else if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = strings.Trim(host[:i], "[]")
+	} else {
+		host = strings.Trim(host, "[]")
+	}
+	if host == "127.0.0.1" || host == "::1" {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			first := strings.TrimSpace(strings.Split(xff, ",")[0])
+			if first != "" {
+				return first
+			}
+		}
+		return host
 	}
 	return host
 }
