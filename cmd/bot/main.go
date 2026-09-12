@@ -1380,7 +1380,7 @@ func weekdayToCronNumber(day time.Weekday) int {
 }
 
 func updateSchedulerCron(day time.Weekday) (string, error) {
-	const schedulerCmd = "cd /home/ubuntu && ./court-bot run --now >> /home/ubuntu/court-bot.log 2>&1"
+	const schedulerCmd = "cd /home/ubuntu/court && ./court-bot run --now >> /home/ubuntu/court/log/court-bot.log 2>&1"
 	newLine := fmt.Sprintf("0 0 * * %d %s", weekdayToCronNumber(day), schedulerCmd)
 
 	listCmd := exec.Command("crontab", "-l")

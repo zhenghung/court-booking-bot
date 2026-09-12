@@ -13,21 +13,22 @@ Purpose: deploy and schedule the bot on Oracle Cloud. Audience: humans.
 
 ```bash
 GOOS=linux GOARCH=arm64 go build -o court-bot-linux-arm64 ./cmd/bot
-scp -i ~/.ssh/oracle-box.key court-bot-linux-arm64 ubuntu@149.118.140.17:/home/ubuntu/court-bot.new
-ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "mv ~/court-bot.new ~/court-bot && chmod +x ~/court-bot && ./court-bot ping"
-ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "cd ~ && ./court-bot run --now --dry-run"
+scp -i ~/.ssh/oracle-box.key court-bot-linux-arm64 ubuntu@149.118.140.17:/home/ubuntu/court/court-bot.new
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "mv ~/court/court-bot.new ~/court/court-bot && chmod +x ~/court/court-bot && cd ~/court && ./court-bot ping"
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "cd ~/court && ./court-bot run --now --dry-run"
 ```
 
 Deploy via rename (`court-bot.new` → `court-bot`): direct `scp` onto the
 binary fails while the `bot`/`serve` daemons run it (text file busy), and
-rename leaves running daemons on the old inode — no restarts needed for
-cron-spawned commands.
+rename leaves running daemons on the old inode — restart both units after
+(`sudo systemctl restart court-bot court-serve`) so daemons pick up the new
+binary and current file paths.
 
 ## Schedules file
 
 ```bash
-scp -i ~/.ssh/oracle-box.key schedules.yaml ubuntu@149.118.140.17:/home/ubuntu/.schedules.yaml
-ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "cd ~ && GPROP_SCHEDULES_FILE=/home/ubuntu/.schedules.yaml ./court-bot run --list-schedules"
+scp -i ~/.ssh/oracle-box.key schedules.yaml ubuntu@149.118.140.17:/home/ubuntu/court/schedules.yaml
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "cd ~/court && GPROP_SCHEDULES_FILE=/home/ubuntu/court/schedules.yaml ./court-bot run --list-schedules"
 ```
 
 Cron passes `GPROP_SCHEDULES_FILE` inline (absolute path — never rely on
@@ -37,13 +38,15 @@ CWD). See [configuration](configuration.md) for the schema.
 
 | Schedule | Command | Purpose |
 |----------|---------|---------|
-| `59 23 * * *` | `GPROP_SCHEDULES_FILE=/home/ubuntu/.schedules.yaml ./court-bot run >> /home/ubuntu/court-bot.log 2>&1` | Daily file-DB snipe 23:59 MYT — poll 500ms from 23:59:55, target = next midnight +7d (KL), skips if no schedule matches |
-| `0 8 * * *` | `./court-bot health-check >> /home/ubuntu/health-check.log 2>&1` | Daily login check, alerts on failure only |
+| `59 23 * * *` | `cd /home/ubuntu/court && GPROP_SCHEDULES_FILE=/home/ubuntu/court/schedules.yaml ./court-bot run >> /home/ubuntu/court/log/court-bot.log 2>&1` | Daily file-DB snipe 23:59 MYT — poll 500ms from 23:59:55, target = next midnight +7d (KL), skips if no schedule matches |
+| `0 8 * * *` | `cd /home/ubuntu/court && ./court-bot health-check >> /home/ubuntu/court/log/health-check.log 2>&1` | Daily login check, alerts on failure only |
 
-Cron is daily 23:59; weekday comes from each schedule's `target_day` in `~/.schedules.yaml` (change via `/setday <schedule> <day>` or editing the file — no crontab edit needed, see [operations](operations.md)). `--now` is for manual testing only.
+Cron is daily 23:59; weekday comes from each schedule's `target_day` in `~/court/schedules.yaml` (change via `/setday <schedule> <day>` or editing the file — no crontab edit needed, see [operations](operations.md)). `--now` is for manual testing only.
 
-Server paths: binary `/home/ubuntu/court-bot`, env `/home/ubuntu/.env`,
-schedules `/home/ubuntu/.schedules.yaml`, logs `/home/ubuntu/court-bot.log`.
+Server paths: binary `/home/ubuntu/court/court-bot`, env `/home/ubuntu/.env`
+(shared, symlinked as `/home/ubuntu/court/.env` so `godotenv` finds it when
+CWD is `~/court`), schedules `/home/ubuntu/court/schedules.yaml`, logs
+`/home/ubuntu/court/log/`.
 
 Cohost note: the VM also runs bank-dashboard (own processes, own cron
 line). Edit crontab surgically — only court lines, never a full rewrite.
@@ -62,17 +65,13 @@ cp /home/ubuntu/.env /home/ubuntu/.env.bak-$(date +%Y%m%d-%H%M%S)
 grep -q '^UI_BIND=' /home/ubuntu/.env || echo 'UI_BIND=127.0.0.1' >> /home/ubuntu/.env
 ```
 
-`UI_BIND=127.0.0.1` enforces loopback-only. Install as a systemd unit (fixes
-the manual-daemon reboot gap) — the box has no git checkout, so ship the
-unit file first:
+`UI_BIND=127.0.0.1` enforces loopback-only. Both daemons run as systemd units
+(`deploy/court-bot.service` = Telegram daemon, `deploy/court-serve.service` =
+web UI) — the box has no git checkout, so ship the unit files first:
 
 ```bash
-scp -i ~/.ssh/oracle-box.key deploy/court-serve.service ubuntu@149.118.140.17:/tmp/court-serve.service
-ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "sudo cp /tmp/court-serve.service /etc/systemd/system/court-serve.service"
-sudo systemctl daemon-reload
-sudo systemctl enable --now court-serve
-systemctl is-active court-serve
-ss -tlnp | grep 8080  # expect 127.0.0.1:8080 only
+scp -i ~/.ssh/oracle-box.key deploy/court-bot.service deploy/court-serve.service ubuntu@149.118.140.17:/tmp/
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "sudo cp /tmp/court-bot.service /tmp/court-serve.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now court-bot court-serve && systemctl is-active court-bot court-serve && ss -tlnp | grep 8080"  # expect 127.0.0.1:8080 only
 ```
 
 Set `UI_PASSWORD` in server `.env` (long random value, 16+ chars, never on the
