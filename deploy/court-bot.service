@@ -1,16 +1,15 @@
 [Unit]
-Description=court-bot web UI (behind Caddy HTTPS)
-After=network-online.target
-Wants=network-online.target
+Description=Court Booking Bot Telegram Daemon
+After=network.target
 
 [Service]
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/court
 EnvironmentFile=/home/ubuntu/.env
-ExecStart=/home/ubuntu/court/court-bot serve
+ExecStart=/home/ubuntu/court/court-bot bot
 Restart=always
-RestartSec=5
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target

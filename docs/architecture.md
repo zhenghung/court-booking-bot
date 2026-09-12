@@ -148,7 +148,7 @@ sequenceDiagram
         CLI->>CLI: Load config, compute next run
         CLI->>TG: sendMessage status + booking plan
     else /setday fri-pickle monday (file-DB) or /setday monday (legacy)
-        CLI->>CLI: UpdateScheduleDay ~/.schedules.yaml or setEnvKey ~/.env
+        CLI->>CLI: UpdateScheduleDay ~/court/schedules.yaml or setEnvKey ~/.env
         CLI->>TG: sendMessage updated day (daily cron unchanged in file-DB)
     else /bookings
         CLI->>Gprop: Login per account + GET booking_listing
