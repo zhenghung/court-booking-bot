@@ -28,7 +28,7 @@ binary and current file paths.
 
 ```bash
 scp -i ~/.ssh/oracle-box.key schedules.yaml ubuntu@149.118.140.17:/home/ubuntu/court/schedules.yaml
-ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "cd ~/court && ./court-bot run --list-schedules"
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "cd ~/court && GPROP_SCHEDULES_FILE=/home/ubuntu/court/schedules.yaml ./court-bot run --list-schedules"
 ```
 
 Cron passes `GPROP_SCHEDULES_FILE` inline (absolute path — never rely on
@@ -71,10 +71,7 @@ web UI) — the box has no git checkout, so ship the unit files first:
 
 ```bash
 scp -i ~/.ssh/oracle-box.key deploy/court-bot.service deploy/court-serve.service ubuntu@149.118.140.17:/tmp/
-ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "sudo cp /tmp/court-bot.service /tmp/court-serve.service /etc/systemd/system/ && sudo systemctl daemon-reload"
-sudo systemctl enable --now court-bot court-serve
-systemctl is-active court-bot court-serve
-ss -tlnp | grep 8080  # expect 127.0.0.1:8080 only
+ssh -i ~/.ssh/oracle-box.key ubuntu@149.118.140.17 "sudo cp /tmp/court-bot.service /tmp/court-serve.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now court-bot court-serve && systemctl is-active court-bot court-serve && ss -tlnp | grep 8080"  # expect 127.0.0.1:8080 only
 ```
 
 Set `UI_PASSWORD` in server `.env` (long random value, 16+ chars, never on the
