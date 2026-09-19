@@ -1,6 +1,6 @@
 # Architecture & Flows
 
-CLI bot for `gpropsystems.com`. See `README.md` for usage, `RUNBOOK.md` for ops.
+CLI bot for `gpropsystems.com`. See `README.md` for usage, `docs/operations.md` for ops.
 
 ```mermaid
 flowchart LR
