@@ -8,7 +8,7 @@ Preferred (Telegram, file-DB): `/setday fri-pickle monday` or `/setday sun-badmi
 
 Legacy (no schedules file): `/setday monday` updates `GPROP_TARGET_DAY` and crontab.
 
-Manual fallback: edit `~/court/schedules.yaml` `target_day`, or legacy `GPROP_TARGET_DAY` in server `.env` + `59 23 * * *` crontab (daily file-DB) or `0 0 * * 1` legacy.
+Manual fallback: edit `~/court/schedules.yaml` `target_day`, or legacy `GPROP_TARGET_DAY` in server `.env` + `59 23 * * *` crontab (daily file-DB, plain `run` wait mode) or `0 0 * * <day>` legacy (`./court-bot run --now`, day number from `GPROP_TARGET_DAY`).
 
 ## Update booking plan
 
